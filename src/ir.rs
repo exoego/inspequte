@@ -5,6 +5,7 @@
 pub(crate) struct Class {
     pub(crate) name: String,
     pub(crate) super_name: Option<String>,
+    pub(crate) interfaces: Vec<String>,
     pub(crate) referenced_classes: Vec<String>,
     pub(crate) methods: Vec<Method>,
     pub(crate) artifact_index: i64,
@@ -16,7 +17,9 @@ pub(crate) struct Method {
     pub(crate) name: String,
     pub(crate) descriptor: String,
     pub(crate) access: MethodAccess,
+    pub(crate) nullness: MethodNullness,
     pub(crate) bytecode: Vec<u8>,
+    pub(crate) line_numbers: Vec<LineNumber>,
     pub(crate) cfg: ControlFlowGraph,
     pub(crate) calls: Vec<CallSite>,
     pub(crate) string_literals: Vec<String>,
@@ -38,6 +41,13 @@ pub(crate) struct ExceptionHandler {
     pub(crate) end_pc: u32,
     pub(crate) handler_pc: u32,
     pub(crate) catch_type: Option<String>,
+}
+
+/// Line number mapping entry from bytecode offsets to source lines.
+#[derive(Clone, Debug)]
+pub(crate) struct LineNumber {
+    pub(crate) start_pc: u32,
+    pub(crate) line: u32,
 }
 
 /// Basic block graph for method bytecode.
@@ -104,4 +114,42 @@ pub(crate) enum CallKind {
     Interface,
     Special,
     Static,
+}
+
+/// Nullness classification used by JSpecify checks.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Nullness {
+    Unknown,
+    NonNull,
+    Nullable,
+}
+
+/// Nullness annotations for a method signature.
+#[derive(Clone, Debug)]
+pub(crate) struct MethodNullness {
+    pub(crate) return_nullness: Nullness,
+    pub(crate) parameter_nullness: Vec<Nullness>,
+}
+
+impl MethodNullness {
+    pub(crate) fn unknown(param_count: usize) -> Self {
+        Self {
+            return_nullness: Nullness::Unknown,
+            parameter_nullness: vec![Nullness::Unknown; param_count],
+        }
+    }
+}
+
+impl Method {
+    pub(crate) fn line_for_offset(&self, offset: u32) -> Option<u32> {
+        let mut candidate = None;
+        for entry in &self.line_numbers {
+            if entry.start_pc <= offset {
+                candidate = Some(entry.line);
+            } else {
+                break;
+            }
+        }
+        candidate
+    }
 }

@@ -30,7 +30,7 @@
 - [x] Build CFG per method.
 - [x] Implement configurable rule engine.
 - [x] Add initial rule set: Dead code.
-- [ ] Add initial rule set: JSpecify-based nullness checks.
+- [x] Add initial rule set: JSpecify-based nullness checks.
 - [x] Add initial rule set: Empty catch blocks.
 - [x] Add initial rule set: Insecure API usage sinks.
 - [x] Add initial rule set: Ineffective equals/hashCode.

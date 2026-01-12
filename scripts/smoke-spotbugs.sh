@@ -24,5 +24,5 @@ echo "smoke: writing output to ${log_file}"
 
 while IFS= read -r jar_path; do
   echo "smoke: ${jar_path}"
-  cargo run -- --input="${jar_path}" >> "${log_file}"
+  cargo run -- --input="${jar_path}" --timing >> "${log_file}"
 done < <(find "${lib_dir}" -type f -name "*.jar" | sort)

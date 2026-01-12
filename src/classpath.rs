@@ -70,6 +70,7 @@ mod tests {
             Class {
                 name: "com/example/Foo".to_string(),
                 super_name: None,
+                interfaces: Vec::new(),
                 referenced_classes: vec!["java/lang/Object".to_string()],
                 methods: Vec::new(),
                 artifact_index: 0,
@@ -77,6 +78,7 @@ mod tests {
             Class {
                 name: "com/example/Bar".to_string(),
                 super_name: None,
+                interfaces: Vec::new(),
                 referenced_classes: Vec::new(),
                 methods: Vec::new(),
                 artifact_index: 1,
@@ -93,6 +95,7 @@ mod tests {
         let classes = vec![Class {
             name: "com/example/Foo".to_string(),
             super_name: None,
+            interfaces: Vec::new(),
             referenced_classes: vec!["com/example/Bar".to_string()],
             methods: Vec::new(),
             artifact_index: 0,
@@ -109,6 +112,7 @@ mod tests {
             Class {
                 name: "com/example/Foo".to_string(),
                 super_name: None,
+                interfaces: Vec::new(),
                 referenced_classes: Vec::new(),
                 methods: Vec::new(),
                 artifact_index: 0,
@@ -116,6 +120,7 @@ mod tests {
             Class {
                 name: "com/example/Foo".to_string(),
                 super_name: None,
+                interfaces: Vec::new(),
                 referenced_classes: Vec::new(),
                 methods: Vec::new(),
                 artifact_index: 1,

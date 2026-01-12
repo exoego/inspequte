@@ -7,6 +7,7 @@ license = "AGPL-3.0-only"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+jdescriptor = "0.2.0"
 jclassfile = "0.3.0"
 serde = { version = "1", features = ["derive"] }
 serde-sarif = "0.8.0"

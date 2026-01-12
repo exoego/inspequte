@@ -2,18 +2,22 @@ use std::collections::{BTreeSet, VecDeque};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use anyhow::{Context, Result};
 use jclassfile::class_file;
 use jclassfile::constant_pool::ConstantPool;
 use jclassfile::methods::MethodFlags;
+use jdescriptor::{MethodDescriptor, TypeDescriptor};
 use serde_json::Value;
 use serde_sarif::sarif::{Artifact, ArtifactLocation, ArtifactRoles};
 use zip::ZipArchive;
 
 use crate::cfg::build_cfg;
+use crate::descriptor::method_param_count;
 use crate::ir::{
-    CallKind, CallSite, Class, ExceptionHandler, Instruction, InstructionKind, Method, MethodAccess,
+    CallKind, CallSite, Class, ExceptionHandler, Instruction, InstructionKind, LineNumber, Method,
+    MethodAccess, MethodNullness, Nullness,
 };
 use crate::opcodes;
 
@@ -151,6 +155,7 @@ fn scan_class_file(
     classes.push(Class {
         name: parsed.name,
         super_name: parsed.super_name,
+        interfaces: parsed.interfaces,
         referenced_classes: parsed.referenced_classes,
         methods: parsed.methods,
         artifact_index,
@@ -213,6 +218,7 @@ fn scan_jar_file(
         classes.push(Class {
             name: parsed.name,
             super_name: parsed.super_name,
+            interfaces: parsed.interfaces,
             referenced_classes: parsed.referenced_classes,
             methods: parsed.methods,
             artifact_index: jar_index,
@@ -400,6 +406,7 @@ fn is_jar_path(path: &Path) -> bool {
 struct ParsedClass {
     name: String,
     super_name: Option<String>,
+    interfaces: Vec<String>,
     referenced_classes: Vec<String>,
     methods: Vec<Method>,
 }
@@ -426,6 +433,12 @@ fn parse_class_bytes(data: &[u8]) -> Result<ParsedClass> {
                 .context("resolve super class name")?,
         )
     };
+    let mut interfaces = Vec::new();
+    for interface in class_file.interfaces() {
+        interfaces.push(
+            resolve_class_name(constant_pool, *interface).context("resolve interface name")?,
+        );
+    }
 
     let mut referenced = std::collections::BTreeSet::new();
     for entry in constant_pool {
@@ -439,12 +452,15 @@ fn parse_class_bytes(data: &[u8]) -> Result<ParsedClass> {
     }
     referenced.remove(&class_name);
 
-    let methods =
-        parse_methods(constant_pool, class_file.methods()).context("parse method bytecode")?;
+    let default_nullness = parse_default_nullness(class_file.attributes(), constant_pool)
+        .context("parse class nullness")?;
+    let methods = parse_methods(constant_pool, class_file.methods(), default_nullness)
+        .context("parse method bytecode")?;
 
     Ok(ParsedClass {
         name: class_name,
         super_name,
+        interfaces,
         referenced_classes: referenced.into_iter().collect(),
         methods,
     })
@@ -508,7 +524,8 @@ fn parse_class_bytes_minimal(data: &[u8]) -> Result<ParsedClass> {
         )
     };
 
-    skip_interfaces(data, &mut offset)?;
+    let interfaces =
+        parse_interfaces_minimal(data, &mut offset, &cp_entries, &class_entries)?;
     skip_fields(data, &mut offset)?;
     skip_methods(data, &mut offset)?;
     skip_attributes(data, &mut offset)?;
@@ -528,6 +545,7 @@ fn parse_class_bytes_minimal(data: &[u8]) -> Result<ParsedClass> {
     Ok(ParsedClass {
         name: class_name,
         super_name,
+        interfaces,
         referenced_classes: referenced.into_iter().collect(),
         methods: Vec::new(),
     })
@@ -614,10 +632,19 @@ fn resolve_class_name_minimal(
     }
 }
 
-fn skip_interfaces(data: &[u8], offset: &mut usize) -> Result<()> {
+fn parse_interfaces_minimal(
+    data: &[u8],
+    offset: &mut usize,
+    entries: &[CpEntryMin],
+    class_entries: &[Option<u16>],
+) -> Result<Vec<String>> {
     let count = read_u16_class(data, offset)? as usize;
-    skip_class_bytes(data, offset, count * 2)?;
-    Ok(())
+    let mut interfaces = Vec::with_capacity(count);
+    for _ in 0..count {
+        let index = read_u16_class(data, offset)?;
+        interfaces.push(resolve_class_name_minimal(entries, class_entries, index)?);
+    }
+    Ok(interfaces)
 }
 
 fn skip_fields(data: &[u8], offset: &mut usize) -> Result<()> {
@@ -680,6 +707,7 @@ fn skip_class_bytes(data: &[u8], offset: &mut usize, len: usize) -> Result<()> {
 fn parse_methods(
     constant_pool: &[ConstantPool],
     methods: &[jclassfile::methods::MethodInfo],
+    default_nullness: DefaultNullness,
 ) -> Result<Vec<Method>> {
     let mut parsed = Vec::new();
     for method in methods {
@@ -693,6 +721,13 @@ fn parse_methods(
             is_static: access_flags.contains(MethodFlags::ACC_STATIC),
             is_abstract: access_flags.contains(MethodFlags::ACC_ABSTRACT),
         };
+        let nullness = parse_method_nullness(
+            constant_pool,
+            method.attributes(),
+            &descriptor,
+            default_nullness,
+        )
+            .context("parse method nullness")?;
         let code = method
             .attributes()
             .iter()
@@ -700,13 +735,16 @@ fn parse_methods(
                 jclassfile::attributes::Attribute::Code {
                     code,
                     exception_table,
+                    attributes,
                     ..
-                } => Some((code, exception_table)),
+                } => Some((code, exception_table, attributes)),
                 _ => None,
             });
-        let Some((code, exception_table)) = code else {
+        let Some((code, exception_table, code_attributes)) = code else {
             continue;
         };
+        let line_numbers = parse_line_numbers(code_attributes, constant_pool)
+            .context("parse line numbers")?;
         let (instructions, calls, string_literals) =
             parse_bytecode(code, constant_pool).context("parse bytecode")?;
         let exception_handlers =
@@ -721,7 +759,9 @@ fn parse_methods(
             name,
             descriptor,
             access,
+            nullness,
             bytecode: code.clone(),
+            line_numbers,
             cfg,
             calls,
             string_literals,
@@ -729,6 +769,173 @@ fn parse_methods(
         });
     }
     Ok(parsed)
+}
+
+fn parse_line_numbers(
+    attributes: &[jclassfile::attributes::Attribute],
+    _constant_pool: &[ConstantPool],
+) -> Result<Vec<LineNumber>> {
+    let mut entries = Vec::new();
+    for attribute in attributes {
+        let jclassfile::attributes::Attribute::LineNumberTable { line_number_table } = attribute
+        else {
+            continue;
+        };
+        for record in line_number_table {
+            entries.push(LineNumber {
+                start_pc: record.start_pc() as u32,
+                line: record.line_number() as u32,
+            });
+        }
+    }
+    entries.sort_by_key(|entry| entry.start_pc);
+    Ok(entries)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DefaultNullness {
+    Inherit,
+    Unmarked,
+    NonNull,
+}
+
+fn parse_default_nullness(
+    attributes: &[jclassfile::attributes::Attribute],
+    constant_pool: &[ConstantPool],
+) -> Result<DefaultNullness> {
+    let mut has_marked = false;
+    let mut has_unmarked = false;
+    for attribute in attributes {
+        let jclassfile::attributes::Attribute::RuntimeVisibleAnnotations { annotations, .. } =
+            attribute
+        else {
+            continue;
+        };
+        for annotation in annotations {
+            let name = annotation_class_name(constant_pool, annotation)?;
+            match name.as_str() {
+                "org/jspecify/annotations/NullMarked" => has_marked = true,
+                "org/jspecify/annotations/NullUnmarked" => has_unmarked = true,
+                _ => {}
+            }
+        }
+    }
+    if has_unmarked {
+        return Ok(DefaultNullness::Unmarked);
+    }
+    if has_marked {
+        return Ok(DefaultNullness::NonNull);
+    }
+    Ok(DefaultNullness::Inherit)
+}
+
+fn parse_method_nullness(
+    constant_pool: &[ConstantPool],
+    attributes: &[jclassfile::attributes::Attribute],
+    descriptor: &str,
+    class_default: DefaultNullness,
+) -> Result<MethodNullness> {
+    let param_count = method_param_count(descriptor)?;
+    let mut nullness = MethodNullness::unknown(param_count);
+    for attribute in attributes {
+        let jclassfile::attributes::Attribute::RuntimeVisibleTypeAnnotations { type_annotations } =
+            attribute
+        else {
+            continue;
+        };
+        for annotation in type_annotations {
+            if !annotation.type_path().is_empty() {
+                continue;
+            }
+            let Some(value) = nullness_from_annotation(constant_pool, annotation.annotation())?
+            else {
+                continue;
+            };
+            match (annotation.target_type(), annotation.target_info()) {
+                (
+                    jclassfile::attributes::TargetType::METHOD_RETURN,
+                    jclassfile::attributes::TargetInfo::EmptyTarget,
+                ) => apply_nullness(&mut nullness.return_nullness, value),
+                (
+                    jclassfile::attributes::TargetType::METHOD_FORMAL_PARAMETER,
+                    jclassfile::attributes::TargetInfo::FormalParameterTarget {
+                        formal_parameter_index,
+                    },
+                ) => {
+                    let index = *formal_parameter_index as usize;
+                    if let Some(param) = nullness.parameter_nullness.get_mut(index) {
+                        apply_nullness(param, value);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let method_default = parse_default_nullness(attributes, constant_pool)?;
+    let effective_default = match method_default {
+        DefaultNullness::Inherit => class_default,
+        value => value,
+    };
+    if effective_default == DefaultNullness::NonNull {
+        let descriptor =
+            MethodDescriptor::from_str(descriptor).context("parse method descriptor")?;
+        for (index, param) in descriptor.parameter_types().iter().enumerate() {
+            if is_reference_type(param) {
+                if let Some(param_nullness) = nullness.parameter_nullness.get_mut(index) {
+                    if *param_nullness == Nullness::Unknown {
+                        *param_nullness = Nullness::NonNull;
+                    }
+                }
+            }
+        }
+        if is_reference_type(descriptor.return_type())
+            && nullness.return_nullness == Nullness::Unknown
+        {
+            nullness.return_nullness = Nullness::NonNull;
+        }
+    }
+    Ok(nullness)
+}
+
+fn nullness_from_annotation(
+    constant_pool: &[ConstantPool],
+    annotation: &jclassfile::attributes::Annotation,
+) -> Result<Option<Nullness>> {
+    let name = annotation_class_name(constant_pool, annotation)?;
+    let value = match name.as_str() {
+        "org/jspecify/annotations/Nullable" => Some(Nullness::Nullable),
+        "org/jspecify/annotations/NonNull" => Some(Nullness::NonNull),
+        "org/jspecify/annotations/NullnessUnspecified" => Some(Nullness::Unknown),
+        _ => None,
+    };
+    Ok(value)
+}
+
+fn annotation_class_name(
+    constant_pool: &[ConstantPool],
+    annotation: &jclassfile::attributes::Annotation,
+) -> Result<String> {
+    let descriptor = resolve_utf8(constant_pool, annotation.type_index())
+        .context("resolve annotation type")?;
+    let trimmed = descriptor
+        .strip_prefix('L')
+        .and_then(|value| value.strip_suffix(';'))
+        .context("invalid annotation descriptor")?;
+    Ok(trimmed.to_string())
+}
+
+fn apply_nullness(target: &mut Nullness, value: Nullness) {
+    if *target == Nullness::Unknown {
+        *target = value;
+        return;
+    }
+    if *target != value {
+        *target = Nullness::Unknown;
+    }
+}
+
+fn is_reference_type(ty: &TypeDescriptor) -> bool {
+    matches!(ty, TypeDescriptor::Object(_) | TypeDescriptor::Array(_, _))
 }
 
 fn parse_bytecode(
@@ -1099,6 +1306,87 @@ mod tests {
 
         assert!(result.is_err());
         fs::remove_dir_all(&temp_dir).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn default_nullness_parses_marked_and_unmarked() {
+        let constant_pool = vec![
+            ConstantPool::Utf8 {
+                value: String::new(),
+            },
+            ConstantPool::Utf8 {
+                value: "Lorg/jspecify/annotations/NullMarked;".to_string(),
+            },
+            ConstantPool::Utf8 {
+                value: "Lorg/jspecify/annotations/NullUnmarked;".to_string(),
+            },
+        ];
+        let marked = jclassfile::attributes::Annotation::new(1, Vec::new());
+        let unmarked = jclassfile::attributes::Annotation::new(2, Vec::new());
+
+        let marked_attr = jclassfile::attributes::Attribute::RuntimeVisibleAnnotations {
+            annotations: vec![marked],
+            raw: Vec::new(),
+        };
+        let unmarked_attr = jclassfile::attributes::Attribute::RuntimeVisibleAnnotations {
+            annotations: vec![unmarked],
+            raw: Vec::new(),
+        };
+
+        let marked_default =
+            parse_default_nullness(&[marked_attr.clone()], &constant_pool).expect("marked default");
+        let unmarked_default =
+            parse_default_nullness(&[unmarked_attr], &constant_pool).expect("unmarked default");
+        let empty_default = parse_default_nullness(&[], &constant_pool).expect("empty default");
+
+        assert_eq!(marked_default, DefaultNullness::NonNull);
+        assert_eq!(unmarked_default, DefaultNullness::Unmarked);
+        assert_eq!(empty_default, DefaultNullness::Inherit);
+    }
+
+    #[test]
+    fn default_nullness_applies_to_reference_types() {
+        let constant_pool = vec![ConstantPool::Utf8 {
+            value: String::new(),
+        }];
+        let nullness = parse_method_nullness(
+            &constant_pool,
+            &[],
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            DefaultNullness::NonNull,
+        )
+        .expect("method nullness");
+
+        assert_eq!(nullness.parameter_nullness.len(), 1);
+        assert_eq!(nullness.parameter_nullness[0], Nullness::NonNull);
+        assert_eq!(nullness.return_nullness, Nullness::NonNull);
+    }
+
+    #[test]
+    fn nullunmarked_overrides_class_default() {
+        let constant_pool = vec![
+            ConstantPool::Utf8 {
+                value: String::new(),
+            },
+            ConstantPool::Utf8 {
+                value: "Lorg/jspecify/annotations/NullUnmarked;".to_string(),
+            },
+        ];
+        let unmarked = jclassfile::attributes::Annotation::new(1, Vec::new());
+        let unmarked_attr = jclassfile::attributes::Attribute::RuntimeVisibleAnnotations {
+            annotations: vec![unmarked],
+            raw: Vec::new(),
+        };
+        let nullness = parse_method_nullness(
+            &constant_pool,
+            &[unmarked_attr],
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            DefaultNullness::NonNull,
+        )
+        .expect("method nullness");
+
+        assert_eq!(nullness.parameter_nullness[0], Nullness::Unknown);
+        assert_eq!(nullness.return_nullness, Nullness::Unknown);
     }
 
     fn extract_first_class(jar_path: &Path) -> Result<Vec<u8>> {

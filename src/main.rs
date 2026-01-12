@@ -1,6 +1,7 @@
 mod callgraph;
 mod cfg;
 mod classpath;
+mod descriptor;
 mod engine;
 mod ir;
 mod opcodes;
@@ -79,18 +80,21 @@ fn run(cli: Cli) -> Result<()> {
     let invocation = build_invocation(&invocation_stats);
     let sarif = build_sarif(artifacts, invocation, analysis.rules, analysis.results);
 
+    let write_started_at = Instant::now();
     let mut writer = output_writer(cli.output.as_deref())?;
     serde_json::to_writer_pretty(&mut writer, &sarif)
         .context("failed to serialize SARIF output")?;
     writer
         .write_all(b"\n")
         .context("failed to write SARIF output")?;
-
+    let write_duration_ms = write_started_at.elapsed().as_millis();
+    
     if cli.timing && !cli.quiet {
         eprintln!(
-            "timing: total_ms={} scan_ms={} classes={} artifacts={}",
+            "timing: total_ms={} scan_ms={} write_ms={} (classes={} artifacts={})",
             started_at.elapsed().as_millis(),
             scan_duration_ms,
+            write_duration_ms,
             scan.class_count,
             artifact_count
         );

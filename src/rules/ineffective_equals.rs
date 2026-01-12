@@ -59,7 +59,8 @@ mod tests {
     use super::*;
     use crate::classpath::resolve_classpath;
     use crate::engine::build_context;
-    use crate::ir::{Class, ControlFlowGraph, Method, MethodAccess};
+    use crate::descriptor::method_param_count;
+    use crate::ir::{Class, ControlFlowGraph, Method, MethodAccess, MethodNullness};
 
     fn empty_cfg() -> ControlFlowGraph {
         ControlFlowGraph {
@@ -77,7 +78,11 @@ mod tests {
                 is_static: false,
                 is_abstract: false,
             },
+            nullness: MethodNullness::unknown(
+                method_param_count(descriptor).expect("param count"),
+            ),
             bytecode: vec![0],
+            line_numbers: Vec::new(),
             cfg: empty_cfg(),
             calls: Vec::new(),
             string_literals: Vec::new(),
@@ -89,6 +94,7 @@ mod tests {
         Class {
             name: name.to_string(),
             super_name: None,
+            interfaces: Vec::new(),
             referenced_classes: Vec::new(),
             methods,
             artifact_index: 0,

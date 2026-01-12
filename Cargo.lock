@@ -484,6 +484,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "jdescriptor"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e2592b920e88ddb0779d2478f22cca979d1a6d70db78d0ea1de6567a323d124"
+dependencies = [
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "jobserver"
 version = "0.1.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -754,6 +764,7 @@ dependencies = [
  "anyhow",
  "clap",
  "jclassfile",
+ "jdescriptor",
  "serde",
  "serde-sarif",
  "serde_json",

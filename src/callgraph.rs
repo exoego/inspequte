@@ -138,12 +138,13 @@ fn index_methods(classes: &[Class]) -> BTreeMap<MethodId, ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{CallSite, Method, MethodAccess};
+    use crate::ir::{CallSite, Method, MethodAccess, MethodNullness};
 
     fn class_with_method(name: &str, super_name: Option<&str>, method: &Method) -> Class {
         Class {
             name: name.to_string(),
             super_name: super_name.map(str::to_string),
+            interfaces: Vec::new(),
             referenced_classes: Vec::new(),
             methods: vec![method.clone()],
             artifact_index: 0,
@@ -160,7 +161,9 @@ mod tests {
                 is_static: false,
                 is_abstract: false,
             },
+            nullness: MethodNullness::unknown(0),
             bytecode: Vec::new(),
+            line_numbers: Vec::new(),
             cfg: crate::ir::ControlFlowGraph {
                 blocks: Vec::new(),
                 edges: Vec::new(),
@@ -183,7 +186,9 @@ mod tests {
                 is_static: false,
                 is_abstract: false,
             },
+            nullness: MethodNullness::unknown(0),
             bytecode: Vec::new(),
+            line_numbers: Vec::new(),
             cfg: crate::ir::ControlFlowGraph {
                 blocks: Vec::new(),
                 edges: Vec::new(),

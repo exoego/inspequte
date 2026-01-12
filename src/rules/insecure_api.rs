@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde_sarif::sarif::Result as SarifResult;
 
 use crate::engine::AnalysisContext;
-use crate::rules::{method_location, result_message, Rule, RuleMetadata};
+use crate::rules::{method_location_with_line, result_message, Rule, RuleMetadata};
 
 /// Rule that detects insecure API usage.
 pub(crate) struct InsecureApiRule;
@@ -26,8 +26,15 @@ impl Rule for InsecureApiRule {
                             "Insecure API usage: {}.{}",
                             call.owner, call.name
                         ));
-                        let location =
-                            method_location(&class.name, &method.name, &method.descriptor);
+                        let line = method.line_for_offset(call.offset);
+                        let artifact_uri = context.class_artifact_uri(class);
+                        let location = method_location_with_line(
+                            &class.name,
+                            &method.name,
+                            &method.descriptor,
+                            artifact_uri.as_deref(),
+                            line,
+                        );
                         results.push(
                             SarifResult::builder()
                                 .message(message)
@@ -59,8 +66,9 @@ mod tests {
     use super::*;
     use crate::classpath::resolve_classpath;
     use crate::engine::build_context;
+    use crate::descriptor::method_param_count;
     use crate::ir::{
-        CallKind, CallSite, Class, ControlFlowGraph, Method, MethodAccess,
+        CallKind, CallSite, Class, ControlFlowGraph, Method, MethodAccess, MethodNullness,
     };
 
     fn empty_cfg() -> ControlFlowGraph {
@@ -79,7 +87,11 @@ mod tests {
                 is_static: false,
                 is_abstract: false,
             },
+            nullness: MethodNullness::unknown(
+                method_param_count("()V").expect("param count"),
+            ),
             bytecode: vec![0],
+            line_numbers: Vec::new(),
             cfg: empty_cfg(),
             calls,
             string_literals: Vec::new(),
@@ -91,6 +103,7 @@ mod tests {
         Class {
             name: name.to_string(),
             super_name: None,
+            interfaces: Vec::new(),
             referenced_classes: Vec::new(),
             methods,
             artifact_index: 0,

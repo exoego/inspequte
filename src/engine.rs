@@ -19,6 +19,7 @@ pub(crate) struct AnalysisContext {
     #[allow(dead_code)]
     pub(crate) classpath: ClasspathIndex,
     pub(crate) call_graph: CallGraph,
+    artifact_uris: BTreeMap<i64, String>,
     analysis_target_artifacts: BTreeSet<i64>,
     artifact_parents: BTreeMap<i64, i64>,
 }
@@ -81,11 +82,13 @@ pub(crate) fn build_context(
     artifacts: &[Artifact],
 ) -> AnalysisContext {
     let call_graph = build_call_graph(&classes);
-    let (analysis_target_artifacts, artifact_parents) = analyze_artifacts(artifacts);
+    let (analysis_target_artifacts, artifact_parents, artifact_uris) =
+        analyze_artifacts(artifacts);
     AnalysisContext {
         classes,
         classpath,
         call_graph,
+        artifact_uris,
         analysis_target_artifacts,
         artifact_parents,
     }
@@ -117,13 +120,36 @@ impl AnalysisContext {
         }
         false
     }
+
+    pub(crate) fn artifact_uri(&self, index: i64) -> Option<&str> {
+        self.artifact_uris.get(&index).map(|value| value.as_str())
+    }
+
+    pub(crate) fn class_artifact_uri(&self, class: &Class) -> Option<String> {
+        let uri = self.artifact_uri(class.artifact_index)?;
+        if uri.ends_with(".class") {
+            return Some(uri.to_string());
+        }
+        if uri.ends_with(".jar") {
+            return Some(format!("jar:{}!/{}.class", uri, class.name));
+        }
+        None
+    }
 }
 
-fn analyze_artifacts(artifacts: &[Artifact]) -> (BTreeSet<i64>, BTreeMap<i64, i64>) {
+fn analyze_artifacts(
+    artifacts: &[Artifact],
+) -> (BTreeSet<i64>, BTreeMap<i64, i64>, BTreeMap<i64, String>) {
     let mut analysis_targets = BTreeSet::new();
     let mut parents = BTreeMap::new();
+    let mut uris = BTreeMap::new();
     for (index, artifact) in artifacts.iter().enumerate() {
         let index = index as i64;
+        if let Some(location) = artifact.location.as_ref() {
+            if let Some(uri) = location.uri.as_ref() {
+                uris.insert(index, uri.clone());
+            }
+        }
         if let Some(parent) = artifact.parent_index {
             parents.insert(index, parent);
         }
@@ -136,5 +162,5 @@ fn analyze_artifacts(artifacts: &[Artifact]) -> (BTreeSet<i64>, BTreeMap<i64, i6
             }
         }
     }
-    (analysis_targets, parents)
+    (analysis_targets, parents, uris)
 }

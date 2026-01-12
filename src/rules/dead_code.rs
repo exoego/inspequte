@@ -6,7 +6,7 @@ use serde_sarif::sarif::Result as SarifResult;
 use crate::callgraph::MethodId;
 use crate::engine::AnalysisContext;
 use crate::ir::Method;
-use crate::rules::{method_location, result_message, Rule, RuleMetadata};
+use crate::rules::{method_location_with_line, result_message, Rule, RuleMetadata};
 
 /// Rule that detects unreachable methods.
 pub(crate) struct DeadCodeRule;
@@ -34,7 +34,11 @@ impl Rule for DeadCodeRule {
                     name: method.name.clone(),
                     descriptor: method.descriptor.clone(),
                 };
-                method_map.insert(id.clone(), (class.name.clone(), method));
+                let artifact_uri = context.class_artifact_uri(class);
+                method_map.insert(
+                    id.clone(),
+                    (class.name.clone(), method, artifact_uri),
+                );
                 if is_entry_method(method) {
                     entry_points.push(id);
                 }
@@ -49,7 +53,7 @@ impl Rule for DeadCodeRule {
         let reachable = walk_graph(&entry_points, &adjacency);
 
         let mut results = Vec::new();
-        for (id, (class_name, method)) in method_map {
+        for (id, (class_name, method, artifact_uri)) in method_map {
             if reachable.contains(&id) {
                 continue;
             }
@@ -60,7 +64,14 @@ impl Rule for DeadCodeRule {
                 "Unreachable method: {}.{}{}",
                 class_name, method.name, method.descriptor
             ));
-            let location = method_location(&class_name, &method.name, &method.descriptor);
+            let line = method.line_for_offset(0);
+            let location = method_location_with_line(
+                &class_name,
+                &method.name,
+                &method.descriptor,
+                artifact_uri.as_deref(),
+                line,
+            );
             results.push(
                 SarifResult::builder()
                     .message(message)
@@ -122,7 +133,10 @@ mod tests {
     use super::*;
     use crate::classpath::resolve_classpath;
     use crate::engine::build_context;
-    use crate::ir::{CallKind, CallSite, Class, ControlFlowGraph, MethodAccess};
+    use crate::descriptor::method_param_count;
+    use crate::ir::{
+        CallKind, CallSite, Class, ControlFlowGraph, MethodAccess, MethodNullness,
+    };
 
     fn empty_cfg() -> ControlFlowGraph {
         ControlFlowGraph {
@@ -142,7 +156,11 @@ mod tests {
             name: name.to_string(),
             descriptor: descriptor.to_string(),
             access,
+            nullness: MethodNullness::unknown(
+                method_param_count(descriptor).expect("param count"),
+            ),
             bytecode,
+            line_numbers: Vec::new(),
             cfg: empty_cfg(),
             calls,
             string_literals: Vec::new(),
@@ -154,6 +172,7 @@ mod tests {
         Class {
             name: name.to_string(),
             super_name: None,
+            interfaces: Vec::new(),
             referenced_classes: Vec::new(),
             methods,
             artifact_index: 0,

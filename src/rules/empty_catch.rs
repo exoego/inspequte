@@ -4,7 +4,7 @@ use serde_sarif::sarif::Result as SarifResult;
 use crate::engine::AnalysisContext;
 use crate::ir::Instruction;
 use crate::opcodes;
-use crate::rules::{method_location, result_message, Rule, RuleMetadata};
+use crate::rules::{method_location_with_line, result_message, Rule, RuleMetadata};
 
 /// Rule that detects empty catch blocks.
 pub(crate) struct EmptyCatchRule;
@@ -36,8 +36,15 @@ impl Rule for EmptyCatchRule {
                             "Empty catch block in {}.{}{}",
                             class.name, method.name, method.descriptor
                         ));
-                        let location =
-                            method_location(&class.name, &method.name, &method.descriptor);
+                        let line = method.line_for_offset(handler.handler_pc);
+                        let artifact_uri = context.class_artifact_uri(class);
+                        let location = method_location_with_line(
+                            &class.name,
+                            &method.name,
+                            &method.descriptor,
+                            artifact_uri.as_deref(),
+                            line,
+                        );
                         results.push(
                             SarifResult::builder()
                                 .message(message)
@@ -82,9 +89,10 @@ mod tests {
     use super::*;
     use crate::classpath::resolve_classpath;
     use crate::engine::build_context;
+    use crate::descriptor::method_param_count;
     use crate::ir::{
         BasicBlock, Class, ControlFlowGraph, ExceptionHandler, Instruction, InstructionKind,
-        Method, MethodAccess,
+        Method, MethodAccess, MethodNullness,
     };
 
     fn default_access() -> MethodAccess {
@@ -105,7 +113,11 @@ mod tests {
             name: name.to_string(),
             descriptor: descriptor.to_string(),
             access: default_access(),
+            nullness: MethodNullness::unknown(
+                method_param_count(descriptor).expect("param count"),
+            ),
             bytecode: vec![0],
+            line_numbers: Vec::new(),
             cfg,
             calls: Vec::new(),
             string_literals: Vec::new(),
@@ -117,6 +129,7 @@ mod tests {
         Class {
             name: name.to_string(),
             super_name: None,
+            interfaces: Vec::new(),
             referenced_classes: Vec::new(),
             methods,
             artifact_index: 0,

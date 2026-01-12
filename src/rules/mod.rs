@@ -1,5 +1,8 @@
 use anyhow::Result;
-use serde_sarif::sarif::{Location, LogicalLocation, Message, Result as SarifResult};
+use serde_sarif::sarif::{
+    ArtifactLocation, Location, LogicalLocation, Message, PhysicalLocation, Region,
+    Result as SarifResult,
+};
 
 use crate::engine::AnalysisContext;
 
@@ -23,8 +26,28 @@ pub(crate) trait Rule {
     fn run(&self, context: &AnalysisContext) -> Result<Vec<SarifResult>>;
 }
 
-pub(crate) fn method_location(class_name: &str, method_name: &str, descriptor: &str) -> Location {
+pub(crate) fn method_location_with_line(
+    class_name: &str,
+    method_name: &str,
+    descriptor: &str,
+    artifact_uri: Option<&str>,
+    line: Option<u32>,
+) -> Location {
     let logical = method_logical_location(class_name, method_name, descriptor);
+    if let (Some(uri), Some(line)) = (artifact_uri, line) {
+        if uri.ends_with(".class") {
+            let region = Region::builder().start_line(line as i64).build();
+            let artifact_location = ArtifactLocation::builder().uri(uri.to_string()).build();
+            let physical = PhysicalLocation::builder()
+                .artifact_location(artifact_location)
+                .region(region)
+                .build();
+            return Location::builder()
+                .logical_locations(vec![logical])
+                .physical_location(physical)
+                .build();
+        }
+    }
     Location::builder().logical_locations(vec![logical]).build()
 }
 
