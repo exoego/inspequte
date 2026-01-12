@@ -1,0 +1,11 @@
+[package]
+name = "rustrospective"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+
+[dependencies]
+
+[[bin]]
+name = "rtro"
+path = "src/main.rs"
