@@ -21,10 +21,10 @@
 - [x] Add timing/profiling for parsing.
 
 ## Milestone 3 - IR + Call Graph Prototype
-- Define lean IR for methods, bytecode instructions, and basic blocks.
-- Build call graph with CHA baseline.
-- Emit SARIF code flows for call paths.
-- Add fixtures and golden SARIF snapshots.
+- [x] Define lean IR for methods, bytecode instructions, and basic blocks.
+- [x] Build call graph with CHA baseline.
+- [x] Emit SARIF code flows for call paths.
+- [x] Add fixtures and golden SARIF snapshots.
 
 ## Milestone 4 - CFG + Rule Engine
 - Build CFG per method.

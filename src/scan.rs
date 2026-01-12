@@ -5,22 +5,18 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use jclassfile::class_file;
+use jclassfile::constant_pool::ConstantPool;
 use serde_json::Value;
 use serde_sarif::sarif::{Artifact, ArtifactLocation, ArtifactRoles};
 use zip::ZipArchive;
+
+use crate::ir::{BasicBlock, CallKind, CallSite, Class, Instruction, InstructionKind, Method};
 
 /// Snapshot of parsed artifacts, classes, and counts for a scan.
 pub(crate) struct ScanOutput {
     pub(crate) artifacts: Vec<Artifact>,
     pub(crate) class_count: usize,
-    pub(crate) classes: Vec<ClassRecord>,
-}
-
-/// Parsed class file details required for classpath resolution.
-pub(crate) struct ClassRecord {
-    pub(crate) name: String,
-    pub(crate) referenced_classes: Vec<String>,
-    pub(crate) artifact_index: i64,
+    pub(crate) classes: Vec<Class>,
 }
 
 pub(crate) fn scan_inputs(input: &Path, classpath: &[PathBuf]) -> Result<ScanOutput> {
@@ -73,7 +69,7 @@ fn scan_path(
     strict: bool,
     artifacts: &mut Vec<Artifact>,
     class_count: &mut usize,
-    classes: &mut Vec<ClassRecord>,
+    classes: &mut Vec<Class>,
 ) -> Result<()> {
     if path.is_dir() {
         scan_dir(path, artifacts, class_count, classes)?;
@@ -105,7 +101,7 @@ fn scan_dir(
     path: &Path,
     artifacts: &mut Vec<Artifact>,
     class_count: &mut usize,
-    classes: &mut Vec<ClassRecord>,
+    classes: &mut Vec<Class>,
 ) -> Result<()> {
     let mut entries = Vec::new();
     for entry in fs::read_dir(path)
@@ -133,7 +129,7 @@ fn scan_class_file(
     roles: Option<Vec<Value>>,
     artifacts: &mut Vec<Artifact>,
     class_count: &mut usize,
-    classes: &mut Vec<ClassRecord>,
+    classes: &mut Vec<Class>,
 ) -> Result<()> {
     let data = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
     let parsed =
@@ -141,9 +137,11 @@ fn scan_class_file(
     *class_count += 1;
 
     let artifact_index = push_path_artifact(path, roles, data.len() as u64, None, artifacts)?;
-    classes.push(ClassRecord {
+    classes.push(Class {
         name: parsed.name,
+        super_name: parsed.super_name,
         referenced_classes: parsed.referenced_classes,
+        methods: parsed.methods,
         artifact_index,
     });
     Ok(())
@@ -154,7 +152,7 @@ fn scan_jar_file(
     roles: Option<Vec<Value>>,
     artifacts: &mut Vec<Artifact>,
     class_count: &mut usize,
-    classes: &mut Vec<ClassRecord>,
+    classes: &mut Vec<Class>,
 ) -> Result<()> {
     let file = fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let mut archive =
@@ -196,9 +194,11 @@ fn scan_jar_file(
         let entry_uri = jar_entry_uri(path, &name);
         let artifact_index =
             push_artifact(entry_uri, entry.size(), Some(jar_index), None, artifacts);
-        classes.push(ClassRecord {
+        classes.push(Class {
             name: parsed.name,
+            super_name: parsed.super_name,
             referenced_classes: parsed.referenced_classes,
+            methods: parsed.methods,
             artifact_index,
         });
     }
@@ -376,9 +376,12 @@ fn is_jar_path(path: &Path) -> bool {
 }
 
 /// Parsed class data extracted from class file bytes.
+/// Parsed class data extracted from class file bytes.
 struct ParsedClass {
     name: String,
+    super_name: Option<String>,
     referenced_classes: Vec<String>,
+    methods: Vec<Method>,
 }
 
 fn parse_class_bytes(data: &[u8]) -> Result<ParsedClass> {
@@ -387,10 +390,18 @@ fn parse_class_bytes(data: &[u8]) -> Result<ParsedClass> {
     let constant_pool = class_file.constant_pool();
     let class_name = resolve_class_name(constant_pool, class_file.this_class())
         .context("resolve class name")?;
+    let super_name = if class_file.super_class() == 0 {
+        None
+    } else {
+        Some(
+            resolve_class_name(constant_pool, class_file.super_class())
+                .context("resolve super class name")?,
+        )
+    };
 
     let mut referenced = std::collections::BTreeSet::new();
     for entry in constant_pool {
-        if let jclassfile::constant_pool::ConstantPool::Class { name_index } = entry {
+        if let ConstantPool::Class { name_index } = entry {
             let name = resolve_utf8(constant_pool, *name_index)
                 .context("resolve referenced class name")?;
             if let Some(normalized) = normalize_class_name(&name) {
@@ -400,36 +411,33 @@ fn parse_class_bytes(data: &[u8]) -> Result<ParsedClass> {
     }
     referenced.remove(&class_name);
 
+    let methods = parse_methods(constant_pool, class_file.methods())
+        .context("parse method bytecode")?;
+
     Ok(ParsedClass {
         name: class_name,
+        super_name,
         referenced_classes: referenced.into_iter().collect(),
+        methods,
     })
 }
 
-fn resolve_class_name(
-    constant_pool: &[jclassfile::constant_pool::ConstantPool],
-    class_index: u16,
-) -> Result<String> {
+fn resolve_class_name(constant_pool: &[ConstantPool], class_index: u16) -> Result<String> {
     let entry = constant_pool
         .get(class_index as usize)
         .context("missing class entry")?;
     match entry {
-        jclassfile::constant_pool::ConstantPool::Class { name_index } => {
-            resolve_utf8(constant_pool, *name_index)
-        }
+        ConstantPool::Class { name_index } => resolve_utf8(constant_pool, *name_index),
         _ => anyhow::bail!("unexpected class entry"),
     }
 }
 
-fn resolve_utf8(
-    constant_pool: &[jclassfile::constant_pool::ConstantPool],
-    index: u16,
-) -> Result<String> {
+fn resolve_utf8(constant_pool: &[ConstantPool], index: u16) -> Result<String> {
     let entry = constant_pool
         .get(index as usize)
         .context("missing utf8 entry")?;
     match entry {
-        jclassfile::constant_pool::ConstantPool::Utf8 { value } => Ok(value.clone()),
+        ConstantPool::Utf8 { value } => Ok(value.clone()),
         _ => anyhow::bail!("unexpected utf8 entry"),
     }
 }
@@ -446,6 +454,228 @@ fn normalize_class_name(raw: &str) -> Option<String> {
         return Some(class_name.to_string());
     }
     None
+}
+
+fn parse_methods(constant_pool: &[ConstantPool], methods: &[jclassfile::methods::MethodInfo]) -> Result<Vec<Method>> {
+    let mut parsed = Vec::new();
+    for method in methods {
+        let name = resolve_utf8(constant_pool, method.name_index())
+            .context("resolve method name")?;
+        let descriptor = resolve_utf8(constant_pool, method.descriptor_index())
+            .context("resolve method descriptor")?;
+        let code = method
+            .attributes()
+            .iter()
+            .find_map(|attribute| match attribute {
+                jclassfile::attributes::Attribute::Code { code, .. } => Some(code),
+                _ => None,
+            });
+        let Some(code) = code else {
+            continue;
+        };
+        let (instructions, calls) =
+            parse_bytecode(code, constant_pool).context("parse bytecode")?;
+        let block = BasicBlock {
+            start_offset: 0,
+            end_offset: code.len() as u32,
+            instructions,
+        };
+        parsed.push(Method {
+            name,
+            descriptor,
+            blocks: vec![block],
+            calls,
+        });
+    }
+    Ok(parsed)
+}
+
+fn parse_bytecode(code: &[u8], constant_pool: &[ConstantPool]) -> Result<(Vec<Instruction>, Vec<CallSite>)> {
+    let mut instructions = Vec::new();
+    let mut calls = Vec::new();
+    let mut offset = 0usize;
+    while offset < code.len() {
+        let opcode = code[offset];
+        let start_offset = offset as u32;
+        let length = opcode_length(code, offset)?;
+        if length == 0 || offset + length > code.len() {
+            anyhow::bail!("invalid bytecode length at offset {}", offset);
+        }
+        let kind = match opcode {
+            0xb6 | 0xb7 | 0xb8 | 0xb9 => {
+                let method_index = read_u16(code, offset + 1)?;
+                let method_ref = resolve_method_ref(constant_pool, method_index)
+                    .context("resolve method ref")?;
+                let call_kind = match opcode {
+                    0xb6 => CallKind::Virtual,
+                    0xb7 => CallKind::Special,
+                    0xb8 => CallKind::Static,
+                    0xb9 => CallKind::Interface,
+                    _ => CallKind::Virtual,
+                };
+                let call = CallSite {
+                    owner: method_ref.owner,
+                    name: method_ref.name,
+                    descriptor: method_ref.descriptor,
+                    kind: call_kind,
+                    offset: start_offset,
+                };
+                calls.push(call.clone());
+                InstructionKind::Invoke(call)
+            }
+            _ => InstructionKind::Other(opcode),
+        };
+
+        instructions.push(Instruction {
+            offset: start_offset,
+            kind,
+        });
+        offset += length;
+    }
+    Ok((instructions, calls))
+}
+
+/// Resolved constant pool method reference.
+struct MethodRef {
+    owner: String,
+    name: String,
+    descriptor: String,
+}
+
+fn resolve_method_ref(constant_pool: &[ConstantPool], index: u16) -> Result<MethodRef> {
+    let entry = constant_pool
+        .get(index as usize)
+        .context("missing method ref entry")?;
+    let (class_index, name_and_type_index) = match entry {
+        ConstantPool::Methodref {
+            class_index,
+            name_and_type_index,
+        } => (*class_index, *name_and_type_index),
+        ConstantPool::InterfaceMethodref {
+            class_index,
+            name_and_type_index,
+        } => (*class_index, *name_and_type_index),
+        _ => anyhow::bail!("unexpected method ref entry"),
+    };
+    let owner = resolve_class_name(constant_pool, class_index).context("resolve owner")?;
+    let (name_index, descriptor_index) =
+        resolve_name_and_type(constant_pool, name_and_type_index)?;
+    let name = resolve_utf8(constant_pool, name_index).context("resolve method name")?;
+    let descriptor =
+        resolve_utf8(constant_pool, descriptor_index).context("resolve method descriptor")?;
+    Ok(MethodRef {
+        owner,
+        name,
+        descriptor,
+    })
+}
+
+fn resolve_name_and_type(
+    constant_pool: &[ConstantPool],
+    index: u16,
+) -> Result<(u16, u16)> {
+    let entry = constant_pool
+        .get(index as usize)
+        .context("missing name and type entry")?;
+    match entry {
+        ConstantPool::NameAndType {
+            name_index,
+            descriptor_index,
+        } => Ok((*name_index, *descriptor_index)),
+        _ => anyhow::bail!("unexpected name and type entry"),
+    }
+}
+
+fn opcode_length(code: &[u8], offset: usize) -> Result<usize> {
+    let opcode = code[offset];
+    let length = match opcode {
+        0x00..=0x0f => 1,
+        0x10 => 2,
+        0x11 => 3,
+        0x12 => 2,
+        0x13 | 0x14 => 3,
+        0x15..=0x19 => 2,
+        0x1a..=0x35 => 1,
+        0x36..=0x3a => 2,
+        0x3b..=0x4e => 1,
+        0x4f..=0x56 => 1,
+        0x57..=0x5f => 1,
+        0x60..=0x83 => 1,
+        0x84 => 3,
+        0x85..=0x98 => 1,
+        0x99..=0xa6 => 3,
+        0xa7 | 0xa8 => 3,
+        0xa9 => 2,
+        0xaa => tableswitch_length(code, offset)?,
+        0xab => lookupswitch_length(code, offset)?,
+        0xac..=0xb1 => 1,
+        0xb2..=0xb5 => 3,
+        0xb6..=0xb8 => 3,
+        0xb9 | 0xba => 5,
+        0xbb => 3,
+        0xbc => 2,
+        0xbd => 3,
+        0xbe | 0xbf => 1,
+        0xc0 | 0xc1 => 3,
+        0xc2 | 0xc3 => 1,
+        0xc4 => wide_length(code, offset)?,
+        0xc5 => 4,
+        0xc6 | 0xc7 => 3,
+        0xc8 | 0xc9 => 5,
+        0xca => 1,
+        0xfe | 0xff => 1,
+        _ => anyhow::bail!("unsupported opcode 0x{:02x}", opcode),
+    };
+    Ok(length)
+}
+
+fn tableswitch_length(code: &[u8], offset: usize) -> Result<usize> {
+    let padding = padding(offset);
+    let base = offset + 1 + padding;
+    let low = read_u32(code, base + 4)?;
+    let high = read_u32(code, base + 8)?;
+    let count = high
+        .checked_sub(low)
+        .and_then(|v| v.checked_add(1))
+        .context("invalid tableswitch range")?;
+    Ok(1 + padding + 12 + (count as usize) * 4)
+}
+
+fn lookupswitch_length(code: &[u8], offset: usize) -> Result<usize> {
+    let padding = padding(offset);
+    let base = offset + 1 + padding;
+    let npairs = read_u32(code, base + 4)?;
+    Ok(1 + padding + 8 + (npairs as usize) * 8)
+}
+
+fn wide_length(code: &[u8], offset: usize) -> Result<usize> {
+    let opcode = code
+        .get(offset + 1)
+        .copied()
+        .context("missing wide opcode")?;
+    if opcode == 0x84 {
+        Ok(6)
+    } else {
+        Ok(4)
+    }
+}
+
+fn padding(offset: usize) -> usize {
+    (4 - ((offset + 1) % 4)) % 4
+}
+
+fn read_u16(code: &[u8], offset: usize) -> Result<u16> {
+    let slice = code
+        .get(offset..offset + 2)
+        .context("bytecode u16 out of bounds")?;
+    Ok(u16::from_be_bytes([slice[0], slice[1]]))
+}
+
+fn read_u32(code: &[u8], offset: usize) -> Result<u32> {
+    let slice = code
+        .get(offset..offset + 4)
+        .context("bytecode u32 out of bounds")?;
+    Ok(u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]))
 }
 
 

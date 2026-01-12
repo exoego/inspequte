@@ -2,14 +2,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::Result;
 
-use crate::scan::ClassRecord;
+use crate::ir::Class;
 
 /// Resolved classpath index keyed by class name.
 pub(crate) struct ClasspathIndex {
     pub(crate) classes: BTreeMap<String, i64>,
 }
 
-pub(crate) fn resolve_classpath(classes: &[ClassRecord]) -> Result<ClasspathIndex> {
+pub(crate) fn resolve_classpath(classes: &[Class]) -> Result<ClasspathIndex> {
     let mut class_map: BTreeMap<String, Vec<i64>> = BTreeMap::new();
     for class in classes {
         class_map
@@ -75,14 +75,18 @@ mod tests {
     #[test]
     fn resolve_classpath_accepts_java_references() {
         let classes = vec![
-            ClassRecord {
+            Class {
                 name: "com/example/Foo".to_string(),
+                super_name: None,
                 referenced_classes: vec!["java/lang/Object".to_string()],
+                methods: Vec::new(),
                 artifact_index: 0,
             },
-            ClassRecord {
+            Class {
                 name: "com/example/Bar".to_string(),
+                super_name: None,
                 referenced_classes: Vec::new(),
+                methods: Vec::new(),
                 artifact_index: 1,
             },
         ];
@@ -94,9 +98,11 @@ mod tests {
 
     #[test]
     fn resolve_classpath_rejects_missing_classes() {
-        let classes = vec![ClassRecord {
+        let classes = vec![Class {
             name: "com/example/Foo".to_string(),
+            super_name: None,
             referenced_classes: vec!["com/example/Bar".to_string()],
+            methods: Vec::new(),
             artifact_index: 0,
         }];
 
@@ -110,14 +116,18 @@ mod tests {
     #[test]
     fn resolve_classpath_rejects_duplicates() {
         let classes = vec![
-            ClassRecord {
+            Class {
                 name: "com/example/Foo".to_string(),
+                super_name: None,
                 referenced_classes: Vec::new(),
+                methods: Vec::new(),
                 artifact_index: 0,
             },
-            ClassRecord {
+            Class {
                 name: "com/example/Foo".to_string(),
+                super_name: None,
                 referenced_classes: Vec::new(),
+                methods: Vec::new(),
                 artifact_index: 1,
             },
         ];
