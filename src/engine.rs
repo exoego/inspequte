@@ -11,6 +11,7 @@ use crate::rules::{
     Rule, RuleMetadata, array_equals::ArrayEqualsRule, dead_code::DeadCodeRule,
     empty_catch::EmptyCatchRule, ineffective_equals::IneffectiveEqualsRule,
     insecure_api::InsecureApiRule, nullness::NullnessRule,
+    record_array_field::RecordArrayFieldRule,
 };
 
 /// Inputs shared by analysis rules.
@@ -38,6 +39,7 @@ impl Engine {
             Box::new(EmptyCatchRule),
             Box::new(InsecureApiRule),
             Box::new(IneffectiveEqualsRule),
+            Box::new(RecordArrayFieldRule),
         ];
         rules.sort_by(|a, b| a.metadata().id.cmp(b.metadata().id));
         Self { rules }

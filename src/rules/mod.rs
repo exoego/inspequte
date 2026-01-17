@@ -12,6 +12,7 @@ pub(crate) mod empty_catch;
 pub(crate) mod ineffective_equals;
 pub(crate) mod insecure_api;
 pub(crate) mod nullness;
+pub(crate) mod record_array_field;
 
 /// Metadata describing an analysis rule.
 #[derive(Clone, Debug)]

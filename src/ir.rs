@@ -7,8 +7,24 @@ pub(crate) struct Class {
     pub(crate) super_name: Option<String>,
     pub(crate) interfaces: Vec<String>,
     pub(crate) referenced_classes: Vec<String>,
+    pub(crate) fields: Vec<Field>,
     pub(crate) methods: Vec<Method>,
     pub(crate) artifact_index: i64,
+    pub(crate) is_record: bool,
+}
+
+/// Field definition for a class.
+#[derive(Clone, Debug)]
+pub(crate) struct Field {
+    pub(crate) name: String,
+    pub(crate) descriptor: String,
+    pub(crate) access: FieldAccess,
+}
+
+/// Field access flags used for rule filtering.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FieldAccess {
+    pub(crate) is_static: bool,
 }
 
 /// Intermediate representation for a method and its bytecode.

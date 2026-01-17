@@ -7,6 +7,7 @@ use std::str::FromStr;
 use anyhow::{Context, Result};
 use jclassfile::class_file;
 use jclassfile::constant_pool::ConstantPool;
+use jclassfile::fields::FieldFlags;
 use jclassfile::methods::MethodFlags;
 use jdescriptor::{MethodDescriptor, TypeDescriptor};
 use serde_json::Value;
@@ -16,8 +17,8 @@ use zip::ZipArchive;
 use crate::cfg::build_cfg;
 use crate::descriptor::method_param_count;
 use crate::ir::{
-    CallKind, CallSite, Class, ExceptionHandler, Instruction, InstructionKind, LineNumber, Method,
-    MethodAccess, MethodNullness, Nullness,
+    CallKind, CallSite, Class, ExceptionHandler, Field, FieldAccess, Instruction, InstructionKind,
+    LineNumber, Method, MethodAccess, MethodNullness, Nullness,
 };
 use crate::opcodes;
 
@@ -157,8 +158,10 @@ fn scan_class_file(
         super_name: parsed.super_name,
         interfaces: parsed.interfaces,
         referenced_classes: parsed.referenced_classes,
+        fields: parsed.fields,
         methods: parsed.methods,
         artifact_index,
+        is_record: parsed.is_record,
     });
     Ok(())
 }
@@ -220,8 +223,10 @@ fn scan_jar_file(
             super_name: parsed.super_name,
             interfaces: parsed.interfaces,
             referenced_classes: parsed.referenced_classes,
+            fields: parsed.fields,
             methods: parsed.methods,
             artifact_index: jar_index,
+            is_record: parsed.is_record,
         });
     }
 
@@ -408,7 +413,9 @@ struct ParsedClass {
     super_name: Option<String>,
     interfaces: Vec<String>,
     referenced_classes: Vec<String>,
+    fields: Vec<crate::ir::Field>,
     methods: Vec<Method>,
+    is_record: bool,
 }
 
 fn parse_class_bytes(data: &[u8]) -> Result<ParsedClass> {
@@ -451,6 +458,11 @@ fn parse_class_bytes(data: &[u8]) -> Result<ParsedClass> {
     }
     referenced.remove(&class_name);
 
+    let is_record = class_file
+        .attributes()
+        .iter()
+        .any(|attr| matches!(attr, jclassfile::attributes::Attribute::Record { .. }));
+    let fields = parse_fields(constant_pool, class_file.fields()).context("parse fields")?;
     let default_nullness = parse_default_nullness(class_file.attributes(), constant_pool)
         .context("parse class nullness")?;
     let methods = parse_methods(constant_pool, class_file.methods(), default_nullness)
@@ -461,7 +473,9 @@ fn parse_class_bytes(data: &[u8]) -> Result<ParsedClass> {
         super_name,
         interfaces,
         referenced_classes: referenced.into_iter().collect(),
+        fields,
         methods,
+        is_record,
     })
 }
 
@@ -545,7 +559,9 @@ fn parse_class_bytes_minimal(data: &[u8]) -> Result<ParsedClass> {
         super_name,
         interfaces,
         referenced_classes: referenced.into_iter().collect(),
+        fields: Vec::new(),
         methods: Vec::new(),
+        is_record: false,
     })
 }
 
@@ -700,6 +716,29 @@ fn read_bytes_class<'a>(data: &'a [u8], offset: &mut usize, len: usize) -> Resul
 fn skip_class_bytes(data: &[u8], offset: &mut usize, len: usize) -> Result<()> {
     read_bytes_class(data, offset, len)?;
     Ok(())
+}
+
+fn parse_fields(
+    constant_pool: &[ConstantPool],
+    fields: &[jclassfile::fields::FieldInfo],
+) -> Result<Vec<Field>> {
+    let mut parsed = Vec::new();
+    for field in fields {
+        let name =
+            resolve_utf8(constant_pool, field.name_index()).context("resolve field name")?;
+        let descriptor = resolve_utf8(constant_pool, field.descriptor_index())
+            .context("resolve field descriptor")?;
+        let access_flags = field.access_flags();
+        let access = FieldAccess {
+            is_static: access_flags.contains(FieldFlags::ACC_STATIC),
+        };
+        parsed.push(Field {
+            name,
+            descriptor,
+            access,
+        });
+    }
+    Ok(parsed)
 }
 
 fn parse_methods(

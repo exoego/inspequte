@@ -55,6 +55,13 @@
               "shortDescription": {
                 "text": "Nullness issues guided by JSpecify annotations"
               }
+            },
+            {
+              "id": "RECORD_ARRAY_FIELD",
+              "name": "Record array field",
+              "shortDescription": {
+                "text": "Records should not use array-typed components"
+              }
             }
           ]
         }

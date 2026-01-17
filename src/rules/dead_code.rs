@@ -168,8 +168,10 @@ mod tests {
             super_name: None,
             interfaces: Vec::new(),
             referenced_classes: Vec::new(),
+            fields: Vec::new(),
             methods,
             artifact_index: 0,
+            is_record: false,
         }
     }
 

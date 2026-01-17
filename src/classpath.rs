@@ -72,16 +72,20 @@ mod tests {
                 super_name: None,
                 interfaces: Vec::new(),
                 referenced_classes: vec!["java/lang/Object".to_string()],
+                fields: Vec::new(),
                 methods: Vec::new(),
                 artifact_index: 0,
+                is_record: false,
             },
             Class {
                 name: "com/example/Bar".to_string(),
                 super_name: None,
                 interfaces: Vec::new(),
                 referenced_classes: Vec::new(),
+                fields: Vec::new(),
                 methods: Vec::new(),
                 artifact_index: 1,
+                is_record: false,
             },
         ];
 
@@ -97,8 +101,10 @@ mod tests {
             super_name: None,
             interfaces: Vec::new(),
             referenced_classes: vec!["com/example/Bar".to_string()],
+            fields: Vec::new(),
             methods: Vec::new(),
             artifact_index: 0,
+            is_record: false,
         }];
 
         let result = resolve_classpath(&classes);
@@ -114,16 +120,20 @@ mod tests {
                 super_name: None,
                 interfaces: Vec::new(),
                 referenced_classes: Vec::new(),
+                fields: Vec::new(),
                 methods: Vec::new(),
                 artifact_index: 0,
+                is_record: false,
             },
             Class {
                 name: "com/example/Foo".to_string(),
                 super_name: None,
                 interfaces: Vec::new(),
                 referenced_classes: Vec::new(),
+                fields: Vec::new(),
                 methods: Vec::new(),
                 artifact_index: 1,
+                is_record: false,
             },
         ];
 

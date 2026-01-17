@@ -146,8 +146,10 @@ mod tests {
             super_name: super_name.map(str::to_string),
             interfaces: Vec::new(),
             referenced_classes: Vec::new(),
+            fields: Vec::new(),
             methods: vec![method.clone()],
             artifact_index: 0,
+            is_record: false,
         }
     }
 
