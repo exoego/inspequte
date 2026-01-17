@@ -36,11 +36,11 @@
 - [x] Add initial rule set: Ineffective equals/hashCode.
 
 ## Milestone 5 - CI Hardened Release
-- Stable output ordering and exit codes.
-- Optional SARIF schema validation.
-- Caching for classpath resolution.
-- Benchmarks and performance baselines.
-- CI integration examples.
+- [x] Stable output ordering and exit codes.
+- [x] Optional SARIF schema validation.
+- [ ] Caching for classpath resolution.
+- [ ] Benchmarks and performance baselines.
+- [ ] CI integration examples.
 
 ## Milestone 6 - 1.0 Release
 - Tag `v1.0.0` with release notes.

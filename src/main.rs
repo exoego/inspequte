@@ -18,6 +18,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use jsonschema::JSONSchema;
 use serde_json::json;
 use serde_sarif::sarif::{
     Artifact, Invocation, PropertyBag, Run, Sarif, Tool, ToolComponent, SCHEMA_URL,
@@ -47,9 +48,15 @@ struct Cli {
     timing: bool,
 }
 
-fn main() -> Result<()> {
+fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
-    run(cli)
+    match run(cli) {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("{err:?}");
+            std::process::ExitCode::from(1)
+        }
+    }
 }
 
 fn run(cli: Cli) -> Result<()> {
@@ -67,7 +74,9 @@ fn run(cli: Cli) -> Result<()> {
     let scan = scan_inputs(&cli.input, &cli.classpath)?;
     let scan_duration_ms = scan_started_at.elapsed().as_millis();
     let artifact_count = scan.artifacts.len();
+    let classpath_started_at = Instant::now();
     let classpath_index = resolve_classpath(&scan.classes)?;
+    let classpath_duration_ms = classpath_started_at.elapsed().as_millis();
     let classpath_class_count = classpath_index.classes.len();
     let artifacts = scan.artifacts;
     let context = build_context(scan.classes.clone(), classpath_index, &artifacts);
@@ -75,12 +84,16 @@ fn run(cli: Cli) -> Result<()> {
     let analysis = engine.analyze(context)?;
     let invocation_stats = InvocationStats {
         scan_duration_ms,
+        classpath_duration_ms,
         class_count: scan.class_count,
         artifact_count,
         classpath_class_count,
     };
     let invocation = build_invocation(&invocation_stats);
     let sarif = build_sarif(artifacts, invocation, analysis.rules, analysis.results);
+    if should_validate_sarif() {
+        validate_sarif(&sarif)?;
+    }
 
     let write_started_at = Instant::now();
     let mut writer = output_writer(cli.output.as_deref())?;
@@ -90,12 +103,13 @@ fn run(cli: Cli) -> Result<()> {
         .write_all(b"\n")
         .context("failed to write SARIF output")?;
     let write_duration_ms = write_started_at.elapsed().as_millis();
-    
+
     if cli.timing && !cli.quiet {
         eprintln!(
-            "timing: total_ms={} scan_ms={} write_ms={} (classes={} artifacts={})",
+            "timing: total_ms={} scan_ms={} classpath_ms={} write_ms={} (classes={} artifacts={})",
             started_at.elapsed().as_millis(),
             scan_duration_ms,
+            classpath_duration_ms,
             write_duration_ms,
             scan.class_count,
             artifact_count
@@ -120,6 +134,7 @@ fn output_writer(output: Option<&Path>) -> Result<Box<dyn Write>> {
 /// Metadata captured for SARIF invocation properties.
 struct InvocationStats {
     scan_duration_ms: u128,
+    classpath_duration_ms: u128,
     class_count: usize,
     artifact_count: usize,
     classpath_class_count: usize,
@@ -130,6 +145,10 @@ fn build_invocation(stats: &InvocationStats) -> Invocation {
     let command_line = arguments.join(" ");
     let mut properties = BTreeMap::new();
     properties.insert("inspequte.scan_ms".to_string(), json!(stats.scan_duration_ms));
+    properties.insert(
+        "inspequte.classpath_ms".to_string(),
+        json!(stats.classpath_duration_ms),
+    );
     properties.insert("inspequte.class_count".to_string(), json!(stats.class_count));
     properties.insert(
         "inspequte.artifact_count".to_string(),
@@ -150,6 +169,29 @@ fn build_invocation(stats: &InvocationStats) -> Invocation {
                 .build(),
         )
         .build()
+}
+
+fn should_validate_sarif() -> bool {
+    std::env::var("INSPEQUTE_VALIDATE_SARIF")
+        .ok()
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+fn validate_sarif(sarif: &Sarif) -> Result<()> {
+    let schema = serde_json::from_str(include_str!("../assets/sarif-2.1.0.json"))
+        .context("load SARIF schema")?;
+    let compiled = JSONSchema::compile(&schema)
+        .map_err(|err| anyhow::anyhow!("compile SARIF schema: {err}"))?;
+    let value = serde_json::to_value(sarif).context("serialize SARIF")?;
+    if let Err(errors) = compiled.validate(&value) {
+        let message = errors
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        anyhow::bail!("SARIF schema validation failed:\n{message}");
+    }
+    Ok(())
 }
 
 fn build_sarif(
@@ -213,6 +255,7 @@ mod tests {
     fn sarif_is_minimal_and_valid_shape() {
         let invocation = build_invocation(&InvocationStats {
             scan_duration_ms: 0,
+            classpath_duration_ms: 0,
             class_count: 0,
             artifact_count: 0,
             classpath_class_count: 0,

@@ -1,6 +1,6 @@
 # inspequte
 
-[![CI](https://github.com/KengoTODA/rustrospective/actions/workflows/ci.yml/badge.svg)](https://github.com/KengoTODA/rustrospective/actions/workflows/ci.yml)
+[![CI](https://github.com/KengoTODA/inspequte/actions/workflows/ci.yml/badge.svg)](https://github.com/KengoTODA/inspequte/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.en.html)
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg)](https://www.conventionalcommits.org/en/v1.0.0/)
 
@@ -34,6 +34,9 @@ The name combines "inspect" and "qute". The CLI command is `inspequte`.
 ```
 inspequte --input app.jar --classpath lib/ --output results.sarif
 ```
+
+## Environment variables
+- `INSPEQUTE_VALIDATE_SARIF=1` validates SARIF output against the bundled schema (dev only).
 
 ## SARIF output (example)
 ```json

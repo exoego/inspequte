@@ -27,7 +27,7 @@
 - `Cargo.toml` declares the crate and `inspequte` binary.
 - `.github/workflows/ci.yml` builds, tests, and uploads release artifacts.
 
-## Next focus (Milestone 1)
-- Implement CLI skeleton.
-- Emit SARIF using `serde-sarif`.
-- Deterministic output ordering.
+## Next focus (Milestone 5)
+- Caching for classpath resolution.
+- Benchmarks and performance baselines.
+- CI integration examples.
