@@ -15,7 +15,7 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
     steps:
       - name: Release Please
-        uses: googleapis/release-please-action@7d00425336eb26c4b8cd3a3ea433d840350b8a4a # v4.3.0
+        uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
         id: release
         with:
           config-file: release-please-config.json
