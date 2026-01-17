@@ -16,7 +16,7 @@ impl Rule for IneffectiveEqualsRule {
         }
     }
 
-fn run(&self, context: &AnalysisContext) -> Result<Vec<SarifResult>> {
+    fn run(&self, context: &AnalysisContext) -> Result<Vec<SarifResult>> {
         let mut results = Vec::new();
         for class in &context.classes {
             let mut has_equals = false;
@@ -61,6 +61,7 @@ mod tests {
     use crate::engine::build_context;
     use crate::descriptor::method_param_count;
     use crate::ir::{Class, ControlFlowGraph, Method, MethodAccess, MethodNullness};
+    use crate::test_harness::{JvmTestHarness, Language, SourceFile};
 
     fn empty_cfg() -> ControlFlowGraph {
         ControlFlowGraph {
@@ -146,5 +147,38 @@ mod tests {
             IneffectiveEqualsRule.run(&context).expect("ineffective equals rule run");
 
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn ineffective_equals_rule_reports_override_from_harness() {
+        let harness = JvmTestHarness::new().expect("JAVA_HOME must be set for harness tests");
+        let sources = vec![SourceFile {
+            path: "com/example/Value.java".to_string(),
+            contents: r#"
+package com.example;
+public class Value {
+    @Override
+    public boolean equals(Object other) {
+        return other instanceof Value;
+    }
+}
+"#
+            .to_string(),
+        }];
+
+        let output = harness
+            .compile_and_analyze(Language::Java, &sources, &[])
+            .expect("run harness analysis");
+
+        let messages: Vec<String> = output
+            .results
+            .iter()
+            .filter(|result| result.rule_id.as_deref() == Some("INEFFECTIVE_EQUALS_HASHCODE"))
+            .filter_map(|result| result.message.text.clone())
+            .collect();
+
+        assert!(messages
+            .iter()
+            .any(|msg| msg.contains("overrides equals without hashCode")));
     }
 }

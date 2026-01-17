@@ -137,6 +137,7 @@ mod tests {
     use crate::ir::{
         CallKind, CallSite, Class, ControlFlowGraph, MethodAccess, MethodNullness,
     };
+    use crate::test_harness::{JvmTestHarness, Language, SourceFile};
 
     fn empty_cfg() -> ControlFlowGraph {
         ControlFlowGraph {
@@ -292,5 +293,39 @@ mod tests {
         let results = DeadCodeRule.run(&context).expect("dead code rule run");
 
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn dead_code_rule_reports_unreachable_method_from_harness() {
+        let harness = JvmTestHarness::new().expect("JAVA_HOME must be set for harness tests");
+        let sources = vec![SourceFile {
+            path: "com/example/App.java".to_string(),
+            contents: r#"
+package com.example;
+public class App {
+    public void entry() {
+        helper();
+    }
+
+    private void helper() {}
+
+    private void unused() {}
+}
+"#
+            .to_string(),
+        }];
+
+        let output = harness
+            .compile_and_analyze(Language::Java, &sources, &[])
+            .expect("run harness analysis");
+
+        let messages: Vec<String> = output
+            .results
+            .iter()
+            .filter(|result| result.rule_id.as_deref() == Some("DEAD_CODE"))
+            .filter_map(|result| result.message.text.clone())
+            .collect();
+
+        assert!(messages.iter().any(|msg| msg.contains("unused()V")));
     }
 }

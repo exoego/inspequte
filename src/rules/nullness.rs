@@ -588,6 +588,7 @@ mod tests {
         BasicBlock, CallKind, CallSite, Class, ControlFlowGraph, Instruction, InstructionKind,
         MethodAccess, MethodNullness,
     };
+    use crate::test_harness::{JvmTestHarness, Language, SourceFile};
 
     fn method_with(
         name: &str,
@@ -638,6 +639,88 @@ mod tests {
     fn context_for(classes: Vec<Class>) -> AnalysisContext {
         let classpath = resolve_classpath(&classes).expect("classpath build");
         build_context(classes, classpath, &[])
+    }
+
+    fn jspecify_stubs() -> Vec<SourceFile> {
+        vec![
+            SourceFile {
+                path: "org/jspecify/annotations/NullMarked.java".to_string(),
+                contents: r#"
+package org.jspecify.annotations;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+@Retention(RetentionPolicy.RUNTIME)
+@Target({ElementType.TYPE, ElementType.PACKAGE})
+public @interface NullMarked {}
+"#
+                .to_string(),
+            },
+            SourceFile {
+                path: "org/jspecify/annotations/NullUnmarked.java".to_string(),
+                contents: r#"
+package org.jspecify.annotations;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+@Retention(RetentionPolicy.RUNTIME)
+@Target({ElementType.TYPE, ElementType.PACKAGE})
+public @interface NullUnmarked {}
+"#
+                .to_string(),
+            },
+            SourceFile {
+                path: "org/jspecify/annotations/Nullable.java".to_string(),
+                contents: r#"
+package org.jspecify.annotations;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+@Retention(RetentionPolicy.RUNTIME)
+@Target({ElementType.TYPE_USE, ElementType.TYPE_PARAMETER})
+public @interface Nullable {}
+"#
+                .to_string(),
+            },
+            SourceFile {
+                path: "org/jspecify/annotations/NonNull.java".to_string(),
+                contents: r#"
+package org.jspecify.annotations;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+@Retention(RetentionPolicy.RUNTIME)
+@Target({ElementType.TYPE_USE, ElementType.TYPE_PARAMETER})
+public @interface NonNull {}
+"#
+                .to_string(),
+            },
+            SourceFile {
+                path: "org/jspecify/annotations/NullnessUnspecified.java".to_string(),
+                contents: r#"
+package org.jspecify.annotations;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+@Retention(RetentionPolicy.RUNTIME)
+@Target({ElementType.TYPE_USE, ElementType.TYPE_PARAMETER})
+public @interface NullnessUnspecified {}
+"#
+                .to_string(),
+            },
+        ]
+    }
+
+    fn analyze_with_harness(sources: Vec<SourceFile>) -> crate::engine::EngineOutput {
+        let harness = JvmTestHarness::new().expect("JAVA_HOME must be set for harness tests");
+        harness
+            .compile_and_analyze(Language::Java, &sources, &[])
+            .expect("run harness analysis")
     }
 
     #[test]
@@ -849,5 +932,222 @@ mod tests {
         assert_eq!(1, results.len());
         let message = results[0].message.text.as_deref().unwrap_or("");
         assert!(message.contains("possible null receiver"));
+    }
+
+    #[test]
+    fn nullness_rule_reports_nonnull_return_from_marked_class() {
+        let mut sources = jspecify_stubs();
+        sources.push(SourceFile {
+            path: "com/example/Sample.java".to_string(),
+            contents: r#"
+package com.example;
+import org.jspecify.annotations.NullMarked;
+@NullMarked
+public class Sample {
+    public String value() {
+        return null;
+    }
+}
+"#
+            .to_string(),
+        });
+
+        let output = analyze_with_harness(sources);
+        let messages: Vec<String> = output
+            .results
+            .iter()
+            .filter(|result| result.rule_id.as_deref() == Some("NULLNESS"))
+            .filter_map(|result| result.message.text.clone())
+            .collect();
+
+        assert!(messages
+            .iter()
+            .any(|msg| msg.contains("returns null but is @NonNull")));
+    }
+
+    #[test]
+    fn nullness_rule_skips_unmarked_class_returning_null() {
+        let mut sources = jspecify_stubs();
+        sources.push(SourceFile {
+            path: "com/example/Sample.java".to_string(),
+            contents: r#"
+package com.example;
+import org.jspecify.annotations.NullUnmarked;
+@NullUnmarked
+public class Sample {
+    public String value() {
+        return null;
+    }
+}
+"#
+            .to_string(),
+        });
+
+        let output = analyze_with_harness(sources);
+        let has_nullness = output
+            .results
+            .iter()
+            .any(|result| result.rule_id.as_deref() == Some("NULLNESS"));
+        assert!(!has_nullness);
+    }
+
+    #[test]
+    fn nullness_rule_allows_nullable_return_override() {
+        let mut sources = jspecify_stubs();
+        sources.push(SourceFile {
+            path: "com/example/Sample.java".to_string(),
+            contents: r#"
+package com.example;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
+@NullMarked
+public class Sample {
+    public @Nullable String value() {
+        return null;
+    }
+}
+"#
+            .to_string(),
+        });
+
+        let output = analyze_with_harness(sources);
+        let has_nullness = output
+            .results
+            .iter()
+            .any(|result| result.rule_id.as_deref() == Some("NULLNESS"));
+        assert!(!has_nullness);
+    }
+
+    #[test]
+    fn nullness_rule_reports_explicit_nonnull_return_in_unmarked_class() {
+        let mut sources = jspecify_stubs();
+        sources.push(SourceFile {
+            path: "com/example/Sample.java".to_string(),
+            contents: r#"
+package com.example;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.NullUnmarked;
+@NullUnmarked
+public class Sample {
+    public @NonNull String value() {
+        return null;
+    }
+}
+"#
+            .to_string(),
+        });
+
+        let output = analyze_with_harness(sources);
+        let messages: Vec<String> = output
+            .results
+            .iter()
+            .filter(|result| result.rule_id.as_deref() == Some("NULLNESS"))
+            .filter_map(|result| result.message.text.clone())
+            .collect();
+
+        assert!(messages
+            .iter()
+            .any(|msg| msg.contains("returns null but is @NonNull")));
+    }
+
+    #[test]
+    fn nullness_rule_reports_nullable_parameter_receiver() {
+        let mut sources = jspecify_stubs();
+        sources.push(SourceFile {
+            path: "com/example/Sample.java".to_string(),
+            contents: r#"
+package com.example;
+import org.jspecify.annotations.Nullable;
+public class Sample {
+    public static void use(@Nullable String value) {
+        value.toString();
+    }
+}
+"#
+            .to_string(),
+        });
+
+        let output = analyze_with_harness(sources);
+        let messages: Vec<String> = output
+            .results
+            .iter()
+            .filter(|result| result.rule_id.as_deref() == Some("NULLNESS"))
+            .filter_map(|result| result.message.text.clone())
+            .collect();
+
+        assert!(messages
+            .iter()
+            .any(|msg| msg.contains("possible null receiver")));
+    }
+
+    #[test]
+    fn nullness_rule_allows_unspecified_parameter() {
+        let mut sources = jspecify_stubs();
+        sources.push(SourceFile {
+            path: "com/example/Sample.java".to_string(),
+            contents: r#"
+package com.example;
+import org.jspecify.annotations.NullnessUnspecified;
+public class Sample {
+    public static void use(@NullnessUnspecified String value) {
+        value.toString();
+    }
+}
+"#
+            .to_string(),
+        });
+
+        let output = analyze_with_harness(sources);
+        let has_nullness = output
+            .results
+            .iter()
+            .any(|result| result.rule_id.as_deref() == Some("NULLNESS"));
+        assert!(!has_nullness);
+    }
+
+    #[test]
+    fn nullness_rule_reports_override_mismatch_from_annotations() {
+        let mut sources = jspecify_stubs();
+        sources.extend(vec![
+            SourceFile {
+                path: "com/example/Base.java".to_string(),
+                contents: r#"
+package com.example;
+import org.jspecify.annotations.NonNull;
+public class Base {
+    public @NonNull String value() {
+        return "ok";
+    }
+}
+"#
+                .to_string(),
+            },
+            SourceFile {
+                path: "com/example/Derived.java".to_string(),
+                contents: r#"
+package com.example;
+import org.jspecify.annotations.Nullable;
+public class Derived extends Base {
+    @Override
+    public @Nullable String value() {
+        return null;
+    }
+}
+"#
+                .to_string(),
+            },
+        ]);
+
+        let output = analyze_with_harness(sources);
+        let messages: Vec<String> = output
+            .results
+            .iter()
+            .filter(|result| result.rule_id.as_deref() == Some("NULLNESS"))
+            .filter_map(|result| result.message.text.clone())
+            .collect();
+
+        assert!(messages
+            .iter()
+            .any(|msg| msg.contains("returns @Nullable but overrides @NonNull")));
     }
 }
