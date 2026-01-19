@@ -19,7 +19,7 @@ inspequte is a fast, CLI-first static analysis tool for JVM class and JAR files.
 It focuses on CI/CD speed, deterministic output, and SARIF-only reporting for global
 standard compatibility.
 
-The name combines "inspect" and "qute". The CLI command is `inspequte`.
+The name combines "inspect" and "cute". The CLI command is `inspequte`.
 
 ## Goals
 - Fast startup and analysis for CI pipelines.
