@@ -222,7 +222,7 @@ fn scan_jar_file(
         "inspequte.jar_path",
         path.display().to_string(),
     )];
-    match telemetry {
+    let result = match telemetry {
         Some(telemetry) => telemetry.in_span("jar.scan", &jar_span_attributes, || {
             scan_jar_file_inner(
                 path,
@@ -232,9 +232,10 @@ fn scan_jar_file(
                 class_count,
                 classes,
             )
-        })?,
-        None => scan_jar_file_inner(path, roles, None, artifacts, class_count, classes)?,
-    }
+        }),
+        None => scan_jar_file_inner(path, roles, None, artifacts, class_count, classes),
+    };
+    result
 }
 
 fn scan_jar_file_inner(
