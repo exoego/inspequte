@@ -18,6 +18,7 @@ use crate::rules::{
     insecure_api::InsecureApiRule, nullness::NullnessRule,
     record_array_field::RecordArrayFieldRule,
     slf4j_format_should_be_const::Slf4jFormatShouldBeConstRule,
+    slf4j_logger_should_be_final::Slf4jLoggerShouldBeFinalRule,
     slf4j_logger_should_be_private::Slf4jLoggerShouldBePrivateRule,
     slf4j_placeholder_mismatch::Slf4jPlaceholderMismatchRule,
 };
@@ -60,6 +61,7 @@ impl Engine {
             Box::new(IneffectiveEqualsRule),
             Box::new(RecordArrayFieldRule),
             Box::new(Slf4jFormatShouldBeConstRule),
+            Box::new(Slf4jLoggerShouldBeFinalRule),
             Box::new(Slf4jLoggerShouldBePrivateRule),
             Box::new(Slf4jPlaceholderMismatchRule),
         ];

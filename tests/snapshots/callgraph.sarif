@@ -71,6 +71,13 @@
               }
             },
             {
+              "id": "SLF4J_LOGGER_SHOULD_BE_FINAL",
+              "name": "SLF4J logger should be final",
+              "shortDescription": {
+                "text": "SLF4J Logger fields should be final"
+              }
+            },
+            {
               "id": "SLF4J_LOGGER_SHOULD_BE_PRIVATE",
               "name": "SLF4J logger should be private",
               "shortDescription": {

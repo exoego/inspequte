@@ -26,6 +26,7 @@ pub(crate) struct Field {
 pub(crate) struct FieldAccess {
     pub(crate) is_static: bool,
     pub(crate) is_private: bool,
+    pub(crate) is_final: bool,
 }
 
 /// Intermediate representation for a method and its bytecode.
