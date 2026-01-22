@@ -292,6 +292,7 @@ struct State {
 struct StackValue {
     nullness: Nullness,
     local: Option<usize>,
+    is_null_literal: bool,
 }
 
 /// Transfer output for a basic block, including emitted results.
@@ -341,13 +342,13 @@ fn transfer_block(
     let mut state = input.clone();
     let mut results = Vec::new();
     let mut branch_refinement = None;
-    for (index, inst) in block.instructions.iter().enumerate() {
-        let is_last = index + 1 == block.instructions.len();
+    for inst in &block.instructions {
         match inst.opcode {
             opcodes::ACONST_NULL => {
                 state.stack.push(StackValue {
                     nullness: Nullness::Nullable,
                     local: None,
+                    is_null_literal: true,
                 });
             }
             opcodes::ALOAD => {
@@ -364,6 +365,7 @@ fn transfer_block(
                 state.stack.push(StackValue {
                     nullness,
                     local: Some(local_index),
+                    is_null_literal: false,
                 });
             }
             opcodes::ALOAD_0 | opcodes::ALOAD_1 | opcodes::ALOAD_2 | opcodes::ALOAD_3 => {
@@ -376,6 +378,7 @@ fn transfer_block(
                 state.stack.push(StackValue {
                     nullness,
                     local: Some(local_index),
+                    is_null_literal: false,
                 });
             }
             opcodes::ASTORE => {
@@ -387,6 +390,7 @@ fn transfer_block(
                 let value = state.stack.pop().unwrap_or(StackValue {
                     nullness: Nullness::Unknown,
                     local: None,
+                    is_null_literal: false,
                 });
                 if let Some(local) = state.locals.get_mut(local_index) {
                     *local = value.nullness;
@@ -397,6 +401,7 @@ fn transfer_block(
                 let value = state.stack.pop().unwrap_or(StackValue {
                     nullness: Nullness::Unknown,
                     local: None,
+                    is_null_literal: false,
                 });
                 if let Some(local) = state.locals.get_mut(local_index) {
                     *local = value.nullness;
@@ -414,17 +419,54 @@ fn transfer_block(
                 state.stack.push(StackValue {
                     nullness: Nullness::NonNull,
                     local: None,
+                    is_null_literal: false,
                 });
             }
             opcodes::IFNULL | opcodes::IFNONNULL => {
                 let value = state.stack.pop().unwrap_or(StackValue {
                     nullness: Nullness::Unknown,
                     local: None,
+                    is_null_literal: false,
                 });
-                if is_last {
-                    if let Some(local) = value.local {
+                if let Some(local) = value.local {
+                    let (branch_nullness, fallthrough_nullness) = if inst.opcode == opcodes::IFNULL
+                    {
+                        (Nullness::Nullable, Nullness::NonNull)
+                    } else {
+                        (Nullness::NonNull, Nullness::Nullable)
+                    };
+                    branch_refinement = Some(BranchRefinement {
+                        local,
+                        branch_nullness,
+                        fallthrough_nullness,
+                    });
+                    if let Some(local_ref) = state.locals.get_mut(local) {
+                        *local_ref = fallthrough_nullness;
+                    }
+                }
+            }
+            opcodes::IF_ACMPEQ | opcodes::IF_ACMPNE => {
+                let right = state.stack.pop().unwrap_or(StackValue {
+                    nullness: Nullness::Unknown,
+                    local: None,
+                    is_null_literal: false,
+                });
+                let left = state.stack.pop().unwrap_or(StackValue {
+                    nullness: Nullness::Unknown,
+                    local: None,
+                    is_null_literal: false,
+                });
+                let (local, null_literal) = if left.local.is_some() && right.is_null_literal {
+                    (left.local, true)
+                } else if right.local.is_some() && left.is_null_literal {
+                    (right.local, true)
+                } else {
+                    (None, false)
+                };
+                if null_literal {
+                    if let Some(local) = local {
                         let (branch_nullness, fallthrough_nullness) =
-                            if inst.opcode == opcodes::IFNULL {
+                            if inst.opcode == opcodes::IF_ACMPEQ {
                                 (Nullness::Nullable, Nullness::NonNull)
                             } else {
                                 (Nullness::NonNull, Nullness::Nullable)
@@ -434,6 +476,9 @@ fn transfer_block(
                             branch_nullness,
                             fallthrough_nullness,
                         });
+                        if let Some(local_ref) = state.locals.get_mut(local) {
+                            *local_ref = fallthrough_nullness;
+                        }
                     }
                 }
             }
@@ -451,6 +496,7 @@ fn transfer_block(
                         let receiver = state.stack.pop().unwrap_or(StackValue {
                             nullness: Nullness::Unknown,
                             local: None,
+                            is_null_literal: false,
                         });
                         if receiver.nullness == Nullness::Nullable {
                             let message = result_message(format!(
@@ -479,6 +525,7 @@ fn transfer_block(
                         state.stack.push(StackValue {
                             nullness: return_nullness,
                             local: None,
+                            is_null_literal: false,
                         });
                     }
                 }
@@ -487,6 +534,7 @@ fn transfer_block(
                 let value = state.stack.pop().unwrap_or(StackValue {
                     nullness: Nullness::Unknown,
                     local: None,
+                    is_null_literal: false,
                 });
                 if method.nullness.return_nullness == Nullness::NonNull
                     && value.nullness == Nullness::Nullable
@@ -563,6 +611,7 @@ fn join_states(left: &State, right: &State) -> State {
             .map(|(l, r)| StackValue {
                 nullness: join_nullness(l.nullness, r.nullness),
                 local: if l.local == r.local { l.local } else { None },
+                is_null_literal: l.is_null_literal && r.is_null_literal,
             })
             .collect()
     } else {
@@ -979,6 +1028,42 @@ public class Sample {
                 .iter()
                 .any(|msg| msg.contains("returns null but is @NonNull"))
         );
+    }
+
+    #[test]
+    fn nullness_flow_allows_receiver_after_non_null_check() {
+        let mut sources = jspecify_stubs();
+        sources.push(SourceFile {
+            path: "com/example/Sample.java".to_string(),
+            contents: r#"
+package com.example;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
+@NullMarked
+class Node {
+    void setNext(@Nullable Node next) {}
+}
+@NullMarked
+public class Sample {
+    public void update(@Nullable Node prev, @Nullable Node next) {
+        if (prev != null) {
+            prev.setNext(next);
+        }
+    }
+}
+"#
+            .to_string(),
+        });
+
+        let output = analyze_with_harness(sources);
+        let messages: Vec<String> = output
+            .results
+            .iter()
+            .filter(|result| result.rule_id.as_deref() == Some("NULLNESS"))
+            .filter_map(|result| result.message.text.clone())
+            .collect();
+
+        assert!(messages.is_empty(), "messages: {messages:?}");
     }
 
     #[test]
