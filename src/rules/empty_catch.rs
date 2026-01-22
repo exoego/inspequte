@@ -22,6 +22,9 @@ impl Rule for EmptyCatchRule {
     fn run(&self, context: &AnalysisContext) -> Result<Vec<SarifResult>> {
         let mut results = Vec::new();
         for class in &context.classes {
+            if !context.is_analysis_target_class(class) {
+                continue;
+            }
             let mut attributes = vec![KeyValue::new("inspequte.class", class.name.clone())];
             if let Some(uri) = context.class_artifact_uri(class) {
                 attributes.push(KeyValue::new("inspequte.artifact_uri", uri));
@@ -112,6 +115,7 @@ mod tests {
         Method, MethodAccess, MethodNullness,
     };
     use crate::test_harness::{JvmTestHarness, Language, SourceFile};
+    use serde_sarif::sarif::{Artifact, ArtifactLocation, ArtifactRoles};
 
     fn default_access() -> MethodAccess {
         MethodAccess {
@@ -154,9 +158,34 @@ mod tests {
         }
     }
 
+    fn class_with_methods_and_artifact(
+        name: &str,
+        artifact_index: i64,
+        methods: Vec<Method>,
+    ) -> Class {
+        Class {
+            name: name.to_string(),
+            super_name: None,
+            interfaces: Vec::new(),
+            referenced_classes: Vec::new(),
+            fields: Vec::new(),
+            methods,
+            artifact_index,
+            is_record: false,
+        }
+    }
+
     fn context_for(classes: Vec<Class>) -> crate::engine::AnalysisContext {
         let classpath = resolve_classpath(&classes).expect("classpath build");
         build_context(classes, classpath, &[])
+    }
+
+    fn context_for_with_artifacts(
+        classes: Vec<Class>,
+        artifacts: Vec<Artifact>,
+    ) -> crate::engine::AnalysisContext {
+        let classpath = resolve_classpath(&classes).expect("classpath build");
+        build_context(classes, classpath, &artifacts)
     }
 
     #[test]
@@ -256,5 +285,61 @@ public class EmptyCatchSample {
         let results = EmptyCatchRule.run(&context).expect("empty catch rule run");
 
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn empty_catch_rule_skips_non_target_classes() {
+        let block = BasicBlock {
+            start_offset: 0,
+            end_offset: 1,
+            instructions: vec![Instruction {
+                offset: 0,
+                opcode: opcodes::NOP,
+                kind: InstructionKind::Other(opcodes::NOP),
+            }],
+        };
+        let cfg = ControlFlowGraph {
+            blocks: vec![block],
+            edges: Vec::new(),
+        };
+        let handlers = vec![ExceptionHandler {
+            start_pc: 0,
+            end_pc: 1,
+            handler_pc: 0,
+            catch_type: None,
+        }];
+        let target_method = method_with("entry", "()V", cfg.clone(), handlers.clone());
+        let dependency_method = method_with("helper", "()V", cfg, handlers);
+        let classes = vec![
+            class_with_methods_and_artifact("com/example/App", 0, vec![target_method]),
+            class_with_methods_and_artifact("org/example/Lib", 1, vec![dependency_method]),
+        ];
+        let artifacts = vec![
+            Artifact::builder()
+                .location(
+                    ArtifactLocation::builder()
+                        .uri("file:///target/app.jar".to_string())
+                        .build(),
+                )
+                .roles(vec![
+                    serde_json::to_value(ArtifactRoles::AnalysisTarget)
+                        .expect("serialize artifact role"),
+                ])
+                .build(),
+            Artifact::builder()
+                .location(
+                    ArtifactLocation::builder()
+                        .uri("file:///deps/lib.jar".to_string())
+                        .build(),
+                )
+                .build(),
+        ];
+        let context = context_for_with_artifacts(classes, artifacts);
+
+        let results = EmptyCatchRule.run(&context).expect("empty catch rule run");
+
+        assert_eq!(results.len(), 1);
+        let message = results[0].message.text.as_deref().unwrap_or("");
+        assert!(message.contains("com/example/App.entry()V"));
     }
 }
