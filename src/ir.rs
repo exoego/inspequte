@@ -124,7 +124,7 @@ pub(crate) struct CallSite {
 }
 
 /// Call opcode classification used by CHA.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub(crate) enum CallKind {
     Virtual,
     Interface,

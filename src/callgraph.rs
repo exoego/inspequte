@@ -57,6 +57,8 @@ fn build_edges(
     hierarchy: &BTreeMap<String, Vec<String>>,
     methods: &MethodIndex,
 ) -> Vec<CallEdge> {
+    let mut resolution_cache: HashMap<(String, String, String, CallKind), Vec<Arc<MethodId>>> =
+        HashMap::new();
     let estimated_edges = classes
         .iter()
         .map(|class| {
@@ -76,45 +78,54 @@ fn build_edges(
                 continue;
             };
             for call in &method.calls {
-                match call.kind {
-                    CallKind::Static | CallKind::Special => {
-                        if let Some(callee) =
-                            lookup_method(methods, &call.owner, &call.name, &call.descriptor)
-                        {
-                            edges.push(CallEdge {
-                                caller: caller.clone(),
-                                callee,
-                                kind: call.kind,
-                                offset: call.offset,
-                            });
+                let key = (
+                    call.owner.clone(),
+                    call.name.clone(),
+                    call.descriptor.clone(),
+                    call.kind,
+                );
+                let candidates = if let Some(cached) = resolution_cache.get(&key) {
+                    cached.clone()
+                } else {
+                    let mut resolved = Vec::new();
+                    match call.kind {
+                        CallKind::Static | CallKind::Special => {
+                            if let Some(callee) =
+                                lookup_method(methods, &call.owner, &call.name, &call.descriptor)
+                            {
+                                resolved.push(callee);
+                            }
                         }
-                    }
-                    CallKind::Virtual | CallKind::Interface => {
-                        if let Some(owner_candidate) =
-                            lookup_method(methods, &call.owner, &call.name, &call.descriptor)
-                        {
-                            edges.push(CallEdge {
-                                caller: caller.clone(),
-                                callee: owner_candidate,
-                                kind: call.kind,
-                                offset: call.offset,
-                            });
-                        }
-                        if let Some(descendants) = hierarchy.get(&call.owner) {
-                            for class_name in descendants {
-                                if let Some(candidate) =
-                                    lookup_method(methods, class_name, &call.name, &call.descriptor)
-                                {
-                                    edges.push(CallEdge {
-                                        caller: caller.clone(),
-                                        callee: candidate,
-                                        kind: call.kind,
-                                        offset: call.offset,
-                                    });
+                        CallKind::Virtual | CallKind::Interface => {
+                            if let Some(owner_candidate) =
+                                lookup_method(methods, &call.owner, &call.name, &call.descriptor)
+                            {
+                                resolved.push(owner_candidate);
+                            }
+                            if let Some(descendants) = hierarchy.get(&call.owner) {
+                                for class_name in descendants {
+                                    if let Some(candidate) = lookup_method(
+                                        methods,
+                                        class_name,
+                                        &call.name,
+                                        &call.descriptor,
+                                    ) {
+                                        resolved.push(candidate);
+                                    }
                                 }
                             }
                         }
                     }
+                    resolution_cache.insert(key, resolved.clone());
+                    resolved
+                };
+                for callee in candidates {
+                    edges.push(CallEdge {
+                        caller: caller.clone(),
+                        callee,
+                        kind: call.kind,
+                        offset: call.offset,
+                    });
                 }
             }
         }
