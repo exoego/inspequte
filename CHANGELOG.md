@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/KengoTODA/inspequte/compare/inspequte-v0.5.0...inspequte-v0.5.1) (2026-01-22)
+
+
+### Performance Improvements
+
+* cache call graph resolutions ([6628b60](https://github.com/KengoTODA/inspequte/commit/6628b603610128f38b9e4657e85cd548a412088f))
+* run rules in parallel ([2546771](https://github.com/KengoTODA/inspequte/commit/254677140b5bc2aa875118e26eed357605b9a6a0))
+
 ## [0.5.0](https://github.com/KengoTODA/inspequte/compare/inspequte-v0.4.0...inspequte-v0.5.0) (2026-01-22)
 
 
