@@ -216,7 +216,10 @@ impl AnalysisContext {
             return Some(uri.to_string());
         }
         if uri.ends_with(".jar") {
-            return Some(format!("jar:{}!/{}.class", uri, class.name));
+            if uri.starts_with("jar:") {
+                return Some(format!("{uri}!/{}.class", class.name));
+            }
+            return Some(format!("jar:{uri}!/{}.class", class.name));
         }
         None
     }

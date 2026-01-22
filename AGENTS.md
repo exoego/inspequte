@@ -8,7 +8,6 @@
 - Commit style: Conventional Commits v1.0.0.
 
 ## Decisions
-- Do not document multithreading for now.
 - Add documentation comments to each struct.
 - Use Java 21 for the test harness via `JAVA_HOME`.
 - Use release-please with crates.io trusted publisher (OIDC).

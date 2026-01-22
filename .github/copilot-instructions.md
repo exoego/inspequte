@@ -16,7 +16,6 @@
 - Use Java 21 for harness tests via `JAVA_HOME`.
 - Run `cargo fmt` after code changes.
 - Commit style: Conventional Commits v1.0.0.
-- Do not document multithreading for now.
 
 ## Rule authoring expectations
 - Add doc comments to any new structs.
