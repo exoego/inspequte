@@ -90,6 +90,13 @@
               "shortDescription": {
                 "text": "SLF4J placeholder count does not match arguments"
               }
+            },
+            {
+              "id": "SLF4J_UNKNOWN_ARRAY",
+              "name": "SLF4J unknown array",
+              "shortDescription": {
+                "text": "SLF4J varargs calls with unknown argument arrays"
+              }
             }
           ]
         }

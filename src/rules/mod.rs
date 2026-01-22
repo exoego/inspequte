@@ -17,6 +17,7 @@ pub(crate) mod slf4j_format_should_be_const;
 pub(crate) mod slf4j_logger_should_be_final;
 pub(crate) mod slf4j_logger_should_be_private;
 pub(crate) mod slf4j_placeholder_mismatch;
+pub(crate) mod slf4j_unknown_array;
 
 /// Metadata describing an analysis rule.
 #[derive(Clone, Debug)]
