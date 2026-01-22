@@ -65,6 +65,9 @@ impl Rule for DeadCodeRule {
             if is_implicit_initializer(method) {
                 continue;
             }
+            if is_lambda_method(method) {
+                continue;
+            }
             if !method_has_body(method) {
                 continue;
             }
@@ -138,6 +141,10 @@ fn method_has_body(method: &Method) -> bool {
 
 fn is_implicit_initializer(method: &Method) -> bool {
     matches!(method.name.as_str(), "<init>" | "<clinit>")
+}
+
+fn is_lambda_method(method: &Method) -> bool {
+    method.name.starts_with("lambda$")
 }
 
 #[cfg(test)]
@@ -374,5 +381,37 @@ public class App {
 
         assert!(!messages.iter().any(|msg| msg.contains("<clinit>")));
         assert!(!messages.iter().any(|msg| msg.contains("<init>")));
+    }
+
+    #[test]
+    fn dead_code_rule_skips_lambda_methods() {
+        let harness = JvmTestHarness::new().expect("JAVA_HOME must be set for harness tests");
+        let sources = vec![SourceFile {
+            path: "com/example/App.java".to_string(),
+            contents: r#"
+package com.example;
+import java.util.function.Supplier;
+public class App {
+    public static final Supplier<String> SUPPLIER = () -> "value";
+    public String entry() {
+        return SUPPLIER.get();
+    }
+}
+"#
+            .to_string(),
+        }];
+
+        let output = harness
+            .compile_and_analyze(Language::Java, &sources, &[])
+            .expect("run harness analysis");
+
+        let messages: Vec<String> = output
+            .results
+            .iter()
+            .filter(|result| result.rule_id.as_deref() == Some("DEAD_CODE"))
+            .filter_map(|result| result.message.text.clone())
+            .collect();
+
+        assert!(!messages.iter().any(|msg| msg.contains("lambda$")));
     }
 }
