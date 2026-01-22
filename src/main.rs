@@ -141,35 +141,41 @@ fn run_scan(args: ScanArgs) -> Result<()> {
         baseline_result?;
         let baseline_duration_ms = baseline_started_at.elapsed().as_millis();
 
-        let invocation = build_invocation(&analysis.invocation_stats);
-        let sarif = build_sarif(
+        let write_duration_ms = with_span(
             telemetry.as_deref(),
-            analysis.artifacts,
-            invocation,
-            analysis.rules,
-            analysis.results,
-        );
-        if should_validate_sarif() {
-            validate_sarif(&sarif)?;
-        }
-
-        let write_started_at = Instant::now();
-        let write_result = with_span(
-            telemetry.as_deref(),
-            "write",
-            &[KeyValue::new("inspequte.phase", "write")],
-            || -> Result<()> {
-                let mut writer = output_writer(args.output.as_deref())?;
-                serde_json::to_writer(&mut writer, &sarif)
-                    .context("failed to serialize SARIF output")?;
-                writer
-                    .write_all(b"\n")
-                    .context("failed to write SARIF output")?;
-                Ok(())
+            "sarif",
+            &[KeyValue::new("inspequte.phase", "sarif")],
+            || -> Result<u128> {
+                let invocation = build_invocation(&analysis.invocation_stats);
+                let sarif = build_sarif(
+                    telemetry.as_deref(),
+                    analysis.artifacts,
+                    invocation,
+                    analysis.rules,
+                    analysis.results,
+                );
+                if should_validate_sarif() {
+                    validate_sarif(&sarif)?;
+                }
+                let write_started_at = Instant::now();
+                let write_result = with_span(
+                    telemetry.as_deref(),
+                    "sarif.write",
+                    &[KeyValue::new("inspequte.phase", "write")],
+                    || -> Result<()> {
+                        let mut writer = output_writer(args.output.as_deref())?;
+                        serde_json::to_writer(&mut writer, &sarif)
+                            .context("failed to serialize SARIF output")?;
+                        writer
+                            .write_all(b"\n")
+                            .context("failed to write SARIF output")?;
+                        Ok(())
+                    },
+                );
+                write_result?;
+                Ok(write_started_at.elapsed().as_millis())
             },
-        );
-        write_result?;
-        let write_duration_ms = write_started_at.elapsed().as_millis();
+        )?;
 
         if args.timing && !args.quiet {
             eprintln!(
