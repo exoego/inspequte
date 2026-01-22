@@ -137,7 +137,7 @@ impl SpanExporter for SpanStoreExporter {
 }
 
 /// OTLP/JSON payload aligned with the OpenTelemetry file exporter spec:
-/// https://opentelemetry.io/docs/specs/otel/protocol/file-exporter/
+/// <https://opentelemetry.io/docs/specs/otel/protocol/file-exporter/>
 /// Root OTLP/JSON request containing all resource spans.
 #[derive(Serialize)]
 struct ExportTraceServiceRequest {
