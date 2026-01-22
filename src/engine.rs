@@ -22,7 +22,7 @@ use crate::rules::{
     slf4j_logger_should_be_private::Slf4jLoggerShouldBePrivateRule,
     slf4j_manually_provided_message::Slf4jManuallyProvidedMessageRule,
     slf4j_placeholder_mismatch::Slf4jPlaceholderMismatchRule,
-    slf4j_unknown_array::Slf4jUnknownArrayRule,
+    slf4j_sign_only_format::Slf4jSignOnlyFormatRule, slf4j_unknown_array::Slf4jUnknownArrayRule,
 };
 use crate::telemetry::{Telemetry, with_span};
 
@@ -67,6 +67,7 @@ impl Engine {
             Box::new(Slf4jLoggerShouldBePrivateRule),
             Box::new(Slf4jManuallyProvidedMessageRule),
             Box::new(Slf4jPlaceholderMismatchRule),
+            Box::new(Slf4jSignOnlyFormatRule),
             Box::new(Slf4jUnknownArrayRule),
         ];
         rules.sort_by(|a, b| a.metadata().id.cmp(b.metadata().id));
