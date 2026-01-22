@@ -1,21 +1,24 @@
 # SLF4J_ILLEGAL_PASSED_CLASS
 
 ## Goal
-Detect illegal class objects passed as logger arguments (e.g., using Class as a formatting arg).
+Detect illegal class objects passed to `LoggerFactory.getLogger(Class)`.
 
 ## Detection approach
-- Match Logger calls and inspect argument types.
-- Report if any argument type is java/lang/Class where not allowed by SLF4J conventions.
+- Match `org/slf4j/LoggerFactory.getLogger(Ljava/lang/Class;)`.
+- Report when the argument is a different class literal than the enclosing class
+  or any of its outer classes.
+- Allow `getClass()` and `EnclosingClass.class` or its outers.
 
 ## Bytecode signals
-- Descriptor parameter types include Ljava/lang/Class;.
-- For varargs arrays, inspect array element types when known.
+- INVOKESTATIC `org/slf4j/LoggerFactory.getLogger` with a `Class` parameter.
+- LDC of a class literal (`Foo.class`) and ALOAD_0 + INVOKEVIRTUAL `java/lang/Object.getClass()`.
 
 ## Tests
-- Report: logger.info("{}", MyType.class)
-- Report: logger.debug(marker, "{}", MyType.class)
-- Allow: logger.info("{}", obj)
+- Report: `LoggerFactory.getLogger(Bar.class)` inside `Foo`.
+- Allow: `LoggerFactory.getLogger(getClass())`.
+- Allow: `LoggerFactory.getLogger(Foo.class)`.
+- Allow: `LoggerFactory.getLogger(Outer.class)` inside `Outer.Inner`.
 
 ## Edge cases
-- Class passed as marker? Should not match.
-- Unknown arg types should not trigger.
+- Nested classes: allow `Outer.class` inside `Outer.Inner`.
+- Unknown arg sources should not trigger.
