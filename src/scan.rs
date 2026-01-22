@@ -14,6 +14,7 @@ use serde_json::Value;
 use serde_sarif::sarif::{Artifact, ArtifactLocation, ArtifactRoles};
 use zip::ZipArchive;
 
+use opentelemetry::Context as OtelContext;
 use opentelemetry::KeyValue;
 
 use crate::cfg::build_cfg;
@@ -217,82 +218,122 @@ fn scan_jar_file(
     class_count: &mut usize,
     classes: &mut Vec<Class>,
 ) -> Result<()> {
-    let mut archive = match telemetry {
+    match telemetry {
         Some(telemetry) => {
             let jar_span_attributes = [KeyValue::new(
                 "inspequte.jar_path",
                 path.display().to_string(),
             )];
-            telemetry.in_span(
-                "jar.scan",
-                &jar_span_attributes,
-                || -> Result<ZipArchive<fs::File>> {
-                    let file = fs::File::open(path)
-                        .with_context(|| format!("failed to open {}", path.display()))?;
-                    ZipArchive::new(file)
-                        .with_context(|| format!("failed to read {}", path.display()))
-                },
-            )?
+            telemetry.in_span("jar.scan", &jar_span_attributes, || -> Result<()> {
+                let parent_cx = OtelContext::current();
+                let file = fs::File::open(path)
+                    .with_context(|| format!("failed to open {}", path.display()))?;
+                let mut archive = ZipArchive::new(file)
+                    .with_context(|| format!("failed to read {}", path.display()))?;
+
+                let jar_len = fs::metadata(path)
+                    .with_context(|| format!("failed to read {}", path.display()))?
+                    .len();
+                let jar_index = push_path_artifact(path, roles, jar_len, None, artifacts)?;
+
+                let mut entry_names = Vec::new();
+                for index in 0..archive.len() {
+                    let entry = archive
+                        .by_index(index)
+                        .with_context(|| format!("failed to read {}", path.display()))?;
+                    if entry.is_dir() {
+                        continue;
+                    }
+                    let name = entry.name().to_string();
+                    // TODO: Handle multi-release entries under META-INF/versions/ in a future release.
+                    if name.ends_with(".class")
+                        && !name.ends_with("module-info.class")
+                        && !name.starts_with("META-INF/versions/")
+                    {
+                        entry_names.push(name);
+                    }
+                }
+
+                entry_names.sort();
+
+                for name in entry_names {
+                    if name.starts_with("META-INF/versions/") {
+                        continue;
+                    }
+                    let class_span_attributes = [
+                        KeyValue::new("inspequte.jar_path", path.display().to_string()),
+                        KeyValue::new("inspequte.jar_entry", name.clone()),
+                    ];
+                    let parsed = telemetry.in_span_with_parent(
+                        "class.scan",
+                        &class_span_attributes,
+                        &parent_cx,
+                        || -> Result<ParsedClass> {
+                            let mut entry = archive.by_name(&name).with_context(|| {
+                                format!("failed to read {}:{}", path.display(), name)
+                            })?;
+                            let mut data = Vec::new();
+                            entry.read_to_end(&mut data).with_context(|| {
+                                format!("failed to read {}:{}", path.display(), name)
+                            })?;
+                            parse_class_bytes(&data).with_context(|| {
+                                format!("failed to parse {}:{}", path.display(), name)
+                            })
+                        },
+                    )?;
+                    *class_count += 1;
+
+                    classes.push(Class {
+                        name: parsed.name,
+                        super_name: parsed.super_name,
+                        interfaces: parsed.interfaces,
+                        referenced_classes: parsed.referenced_classes,
+                        fields: parsed.fields,
+                        methods: parsed.methods,
+                        artifact_index: jar_index,
+                        is_record: parsed.is_record,
+                    });
+                }
+
+                Ok(())
+            })?;
+            Ok(())
         }
         None => {
             let file = fs::File::open(path)
                 .with_context(|| format!("failed to open {}", path.display()))?;
-            ZipArchive::new(file).with_context(|| format!("failed to read {}", path.display()))?
-        }
-    };
+            let mut archive = ZipArchive::new(file)
+                .with_context(|| format!("failed to read {}", path.display()))?;
 
-    let jar_len = fs::metadata(path)
-        .with_context(|| format!("failed to read {}", path.display()))?
-        .len();
-    let jar_index = push_path_artifact(path, roles, jar_len, None, artifacts)?;
+            let jar_len = fs::metadata(path)
+                .with_context(|| format!("failed to read {}", path.display()))?
+                .len();
+            let jar_index = push_path_artifact(path, roles, jar_len, None, artifacts)?;
 
-    let mut entry_names = Vec::new();
-    for index in 0..archive.len() {
-        let entry = archive
-            .by_index(index)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-        if entry.is_dir() {
-            continue;
-        }
-        let name = entry.name().to_string();
-        // TODO: Handle multi-release entries under META-INF/versions/ in a future release.
-        if name.ends_with(".class")
-            && !name.ends_with("module-info.class")
-            && !name.starts_with("META-INF/versions/")
-        {
-            entry_names.push(name);
-        }
-    }
-
-    entry_names.sort();
-
-    for name in entry_names {
-        if name.starts_with("META-INF/versions/") {
-            continue;
-        }
-        let parsed = match telemetry {
-            Some(telemetry) => {
-                let class_span_attributes = [
-                    KeyValue::new("inspequte.jar_path", path.display().to_string()),
-                    KeyValue::new("inspequte.jar_entry", name.clone()),
-                ];
-                telemetry.in_span(
-                    "class.scan",
-                    &class_span_attributes,
-                    || -> Result<ParsedClass> {
-                        let mut entry = archive.by_name(&name).with_context(|| {
-                            format!("failed to read {}:{}", path.display(), name)
-                        })?;
-                        let mut data = Vec::new();
-                        entry.read_to_end(&mut data).with_context(|| {
-                            format!("failed to read {}:{}", path.display(), name)
-                        })?;
-                        parse_class_bytes(&data)
-                            .with_context(|| format!("failed to parse {}:{}", path.display(), name))
-                    },
-                )?
+            let mut entry_names = Vec::new();
+            for index in 0..archive.len() {
+                let entry = archive
+                    .by_index(index)
+                    .with_context(|| format!("failed to read {}", path.display()))?;
+                if entry.is_dir() {
+                    continue;
+                }
+                let name = entry.name().to_string();
+                // TODO: Handle multi-release entries under META-INF/versions/ in a future release.
+                if name.ends_with(".class")
+                    && !name.ends_with("module-info.class")
+                    && !name.starts_with("META-INF/versions/")
+                {
+                    entry_names.push(name);
+                }
             }
-            None => {
+
+            entry_names.sort();
+
+            for name in entry_names {
+                if name.starts_with("META-INF/versions/") {
+                    continue;
+                }
                 let mut entry = archive
                     .by_name(&name)
                     .with_context(|| format!("failed to read {}:{}", path.display(), name))?;
@@ -300,25 +341,25 @@ fn scan_jar_file(
                 entry
                     .read_to_end(&mut data)
                     .with_context(|| format!("failed to read {}:{}", path.display(), name))?;
-                parse_class_bytes(&data)
-                    .with_context(|| format!("failed to parse {}:{}", path.display(), name))?
+                let parsed = parse_class_bytes(&data)
+                    .with_context(|| format!("failed to parse {}:{}", path.display(), name))?;
+                *class_count += 1;
+
+                classes.push(Class {
+                    name: parsed.name,
+                    super_name: parsed.super_name,
+                    interfaces: parsed.interfaces,
+                    referenced_classes: parsed.referenced_classes,
+                    fields: parsed.fields,
+                    methods: parsed.methods,
+                    artifact_index: jar_index,
+                    is_record: parsed.is_record,
+                });
             }
-        };
-        *class_count += 1;
 
-        classes.push(Class {
-            name: parsed.name,
-            super_name: parsed.super_name,
-            interfaces: parsed.interfaces,
-            referenced_classes: parsed.referenced_classes,
-            fields: parsed.fields,
-            methods: parsed.methods,
-            artifact_index: jar_index,
-            is_record: parsed.is_record,
-        });
+            Ok(())
+        }
     }
-
-    Ok(())
 }
 
 /// Push a path-based artifact and return its index for parent linkage (e.g., JAR entries).
