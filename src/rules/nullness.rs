@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use anyhow::Result;
+use opentelemetry::KeyValue;
 use serde_sarif::sarif::Result as SarifResult;
 
 use crate::descriptor::{ReturnKind, method_param_count, method_return_kind};
@@ -34,19 +35,29 @@ impl Rule for NullnessRule {
             if !context.is_analysis_target_class(class) {
                 continue;
             }
-            results.extend(check_overrides(class, &class_map));
-            for method in &class.methods {
-                if method.bytecode.is_empty() {
-                    continue;
-                }
-                let artifact_uri = context.class_artifact_uri(class);
-                results.extend(check_method_flow(
-                    class,
-                    method,
-                    &class_map,
-                    artifact_uri.as_deref(),
-                )?);
+            let mut attributes = vec![KeyValue::new("inspequte.class", class.name.clone())];
+            if let Some(uri) = context.class_artifact_uri(class) {
+                attributes.push(KeyValue::new("inspequte.artifact_uri", uri));
             }
+            let class_results =
+                context.with_span("class", &attributes, || -> Result<Vec<SarifResult>> {
+                    let mut class_results = Vec::new();
+                    class_results.extend(check_overrides(class, &class_map));
+                    for method in &class.methods {
+                        if method.bytecode.is_empty() {
+                            continue;
+                        }
+                        let artifact_uri = context.class_artifact_uri(class);
+                        class_results.extend(check_method_flow(
+                            class,
+                            method,
+                            &class_map,
+                            artifact_uri.as_deref(),
+                        )?);
+                    }
+                    Ok(class_results)
+                })?;
+            results.extend(class_results);
         }
 
         Ok(results)

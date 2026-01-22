@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
 use anyhow::Result;
+use opentelemetry::KeyValue;
 use serde_sarif::sarif::Result as SarifResult;
 
 use crate::callgraph::MethodId;
@@ -29,18 +30,24 @@ impl Rule for DeadCodeRule {
             if !context.is_analysis_target_class(class) {
                 continue;
             }
-            for method in &class.methods {
-                let id = Arc::new(MethodId {
-                    class_name: class.name.clone(),
-                    name: method.name.clone(),
-                    descriptor: method.descriptor.clone(),
-                });
-                let artifact_uri = context.class_artifact_uri(class);
-                method_map.insert(id.clone(), (class.name.clone(), method, artifact_uri));
-                if is_entry_method(method) {
-                    entry_points.push(id);
-                }
+            let mut attributes = vec![KeyValue::new("inspequte.class", class.name.clone())];
+            if let Some(uri) = context.class_artifact_uri(class) {
+                attributes.push(KeyValue::new("inspequte.artifact_uri", uri));
             }
+            context.with_span("class", &attributes, || {
+                for method in &class.methods {
+                    let id = Arc::new(MethodId {
+                        class_name: class.name.clone(),
+                        name: method.name.clone(),
+                        descriptor: method.descriptor.clone(),
+                    });
+                    let artifact_uri = context.class_artifact_uri(class);
+                    method_map.insert(id.clone(), (class.name.clone(), method, artifact_uri));
+                    if is_entry_method(method) {
+                        entry_points.push(id);
+                    }
+                }
+            });
         }
 
         if entry_points.is_empty() {
