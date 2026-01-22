@@ -246,6 +246,7 @@ fn scan_jar_file_inner(
     classes: &mut Vec<Class>,
 ) -> Result<()> {
     let parent_cx = OtelContext::current();
+    let jar_path = path.display().to_string();
     let file =
         fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let mut archive =
@@ -259,13 +260,10 @@ fn scan_jar_file_inner(
     let entry_names = jar_class_entries(path, &mut archive)?;
 
     for name in entry_names {
-        if name.starts_with("META-INF/versions/") {
-            continue;
-        }
         let parsed = match telemetry {
             Some(telemetry) => {
                 let class_span_attributes = [
-                    KeyValue::new("inspequte.jar_path", path.display().to_string()),
+                    KeyValue::new("inspequte.jar_path", jar_path.clone()),
                     KeyValue::new("inspequte.jar_entry", name.clone()),
                 ];
                 telemetry.in_span_with_parent(
