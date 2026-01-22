@@ -23,6 +23,7 @@ jsonschema = "0.17.1"
 futures-util = "0.3"
 opentelemetry = "0.26"
 opentelemetry_sdk = { version = "0.26", features = ["trace"] }
+rayon = "1"
 
 [dev-dependencies]
 ureq = "=3.1.4"

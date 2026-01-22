@@ -3,7 +3,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
+use opentelemetry::Context as OtelContext;
 use opentelemetry::KeyValue;
+use rayon::prelude::*;
 use serde_sarif::sarif::Artifact;
 use serde_sarif::sarif::{MultiformatMessageString, ReportingDescriptor, Result as SarifResult};
 
@@ -42,12 +44,12 @@ pub(crate) struct ContextTimings {
 
 /// Analysis engine that executes configured rules.
 pub(crate) struct Engine {
-    rules: Vec<Box<dyn Rule>>,
+    rules: Vec<Box<dyn Rule + Sync>>,
 }
 
 impl Engine {
     pub(crate) fn new() -> Self {
-        let mut rules: Vec<Box<dyn Rule>> = vec![
+        let mut rules: Vec<Box<dyn Rule + Sync>> = vec![
             Box::new(ArrayEqualsRule),
             Box::new(DeadCodeRule),
             Box::new(NullnessRule),
@@ -62,25 +64,41 @@ impl Engine {
     }
 
     pub(crate) fn analyze(&self, context: AnalysisContext) -> Result<EngineOutput> {
-        let mut rules = Vec::new();
-        let mut results = Vec::new();
-
-        for rule in &self.rules {
-            let metadata = rule.metadata();
-            rules.push(rule_descriptor(&metadata));
-            let rule_span_attributes = [KeyValue::new("inspequte.rule_id", metadata.id)];
-            let mut rule_results = with_span(
-                context.telemetry(),
-                &format!("rule:{}", metadata.id),
-                &rule_span_attributes,
-                || rule.run(&context),
-            )?;
-            for result in &mut rule_results {
-                if result.rule_id.is_none() {
-                    result.rule_id = Some(metadata.id.to_string());
+        let parent_context = OtelContext::current();
+        let mut rule_outputs: Vec<RuleOutput> = self
+            .rules
+            .par_iter()
+            .map(|rule| {
+                let metadata = rule.metadata();
+                let rule_span_attributes = [KeyValue::new("inspequte.rule_id", metadata.id)];
+                let mut rule_results = match context.telemetry() {
+                    Some(telemetry) => telemetry.in_span_with_parent(
+                        &format!("rule:{}", metadata.id),
+                        &rule_span_attributes,
+                        &parent_context,
+                        || rule.run(&context),
+                    )?,
+                    None => rule.run(&context)?,
+                };
+                for result in &mut rule_results {
+                    if result.rule_id.is_none() {
+                        result.rule_id = Some(metadata.id.to_string());
+                    }
                 }
-            }
-            results.extend(rule_results);
+                Ok(RuleOutput {
+                    id: metadata.id.to_string(),
+                    descriptor: rule_descriptor(&metadata),
+                    results: rule_results,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        rule_outputs.sort_by(|left, right| left.id.cmp(&right.id));
+        let mut rules = Vec::with_capacity(rule_outputs.len());
+        let mut results = Vec::new();
+        for output in rule_outputs {
+            rules.push(output.descriptor);
+            results.extend(output.results);
         }
 
         results.sort_by(|left, right| {
@@ -93,6 +111,12 @@ impl Engine {
 
         Ok(EngineOutput { rules, results })
     }
+}
+
+struct RuleOutput {
+    id: String,
+    descriptor: ReportingDescriptor,
+    results: Vec<SarifResult>,
 }
 
 /// Aggregated SARIF payload from rule execution.

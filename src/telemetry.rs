@@ -8,9 +8,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow};
 use futures_util::future::BoxFuture;
 use opentelemetry::trace::{
-    SpanId, SpanKind, TraceContextExt, TraceId, Tracer, TracerProvider as OtelTracerProvider,
+    Span, SpanId, SpanKind, TraceContextExt, TraceId, Tracer, TracerProvider as OtelTracerProvider,
 };
-use opentelemetry::{KeyValue, Value};
+use opentelemetry::{Context as OtelContext, KeyValue, Value};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::export::trace::{ExportResult, SpanData, SpanExporter};
 use opentelemetry_sdk::trace::{Config, SimpleSpanProcessor, TracerProvider};
@@ -61,6 +61,26 @@ impl Telemetry {
             }
             f()
         })
+    }
+
+    /// Run a closure inside a span, using the provided parent context.
+    pub(crate) fn in_span_with_parent<T, F>(
+        &self,
+        name: &str,
+        attributes: &[KeyValue],
+        parent_cx: &OtelContext,
+        f: F,
+    ) -> T
+    where
+        F: FnOnce() -> T,
+    {
+        let mut span = self.tracer.start_with_context(name.to_string(), parent_cx);
+        for attribute in attributes {
+            span.set_attribute(attribute.clone());
+        }
+        let cx = parent_cx.with_span(span);
+        let _guard = cx.attach();
+        f()
     }
 
     /// Flush spans and write OTLP JSON to the configured file.
