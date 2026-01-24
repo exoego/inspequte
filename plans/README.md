@@ -63,8 +63,9 @@ When creating a new plan:
 5. Consider edge cases and false positives
 
 When implementing a plan:
-1. **Remove the plan file** after the implementation is complete and merged
-2. This keeps the plans directory focused on upcoming work, not completed features
+1. **Rename the plan file** with a `.done.md` suffix after the implementation is complete and merged
+   - Example: `01-foo.md` → `01.foo.done.md`
+2. This marks completed work while preserving the implementation history
 
 ## License Considerations
 

@@ -24,5 +24,6 @@
 
 ## Working with Plans
 - Review `plans/` directory for detailed implementation specifications before starting new features.
-- **When you complete a feature implementation, remove the corresponding plan file from `plans/`.**
-- This keeps the plans directory focused on upcoming work only.
+- **When you complete a feature implementation, rename the corresponding plan file with a `.done.md` suffix.**
+  - Example: `01-foo.md` → `01.foo.done.md`
+- This marks completed work while preserving the implementation history.
