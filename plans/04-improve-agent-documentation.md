@@ -1,0 +1,208 @@
+# Plan: Improve Agent Documentation for Test Harness Variable Naming
+
+## Objective
+Update AGENTS.md and related documentation to instruct AI agents (Codex and Copilot) to use meaningless names for variables and classes when writing Java code for the testing harness.
+
+## Problem Statement
+AI agents sometimes use the same meaningful names as code snippets provided by users when generating test harness code. This can lead to:
+- Confusion about which code is the test and which is the sample
+- Reduced ability to detect issues when test code mirrors user examples too closely
+- Less robust tests that may pass for the wrong reasons
+
+## Solution
+Explicitly instruct agents to use generic, meaningless names for test harness code to avoid overlap with user-provided examples.
+
+## Documentation Updates
+
+### 1. Update AGENTS.md
+
+Add a new section under "## Decisions" or create a new "## Test Harness Guidelines":
+
+```markdown
+## Test Harness Guidelines
+- Use meaningless, generic names for variables and classes in test harness Java code.
+- Avoid using the same names as examples provided in issues or documentation.
+- Prefer names like: `ClassA`, `ClassB`, `MethodX`, `MethodY`, `varOne`, `varTwo`, `tmpValue`, etc.
+- This prevents tests from accidentally passing due to name-based matching with user examples.
+- Exception: Use meaningful names when testing actual JDK or library APIs (e.g., `String`, `List`, `Map`).
+```
+
+### 2. Create Test Harness Naming Convention Document
+
+Create a new file: `docs/test-harness-naming.md` or add to existing docs:
+
+```markdown
+# Test Harness Naming Conventions
+
+## Purpose
+When writing Java code for the test harness, use generic, meaningless names to ensure tests are robust and don't accidentally match user-provided examples.
+
+## Guidelines
+
+### Class Names
+✅ Good:
+- `ClassA`, `ClassB`, `ClassC`
+- `TypeOne`, `TypeTwo`
+- `TestClass`, `AnotherTestClass`
+
+❌ Avoid:
+- `UserService`, `OrderProcessor` (meaningful domain names)
+- Names that appear in user-provided examples
+
+### Method Names
+✅ Good:
+- `methodOne()`, `methodTwo()`
+- `doSomething()`, `processData()`
+- `funcA()`, `funcB()`
+
+❌ Avoid:
+- `calculateDiscount()`, `sendEmail()` (meaningful domain names)
+- Names that appear in user-provided examples
+
+### Variable Names
+✅ Good:
+- `varOne`, `varTwo`
+- `tmpValue`, `tmpResult`
+- `obj`, `instance`
+- `a`, `b`, `c` (for simple cases)
+
+❌ Avoid:
+- `userName`, `orderId` (meaningful domain names)
+- Names that appear in user-provided examples
+
+### Field Names
+✅ Good:
+- `fieldA`, `fieldB`
+- `propertyOne`, `propertyTwo`
+- `data`, `value`
+
+❌ Avoid:
+- `emailAddress`, `phoneNumber` (meaningful domain names)
+- Names that appear in user-provided examples
+
+## Exceptions
+- When testing actual JDK or standard library APIs, use the real class names:
+  - `String`, `List`, `Map`, `Thread`, etc.
+- When the test specifically requires a certain name for semantic reasons, document why.
+
+## Example
+
+### ❌ Bad Test Code
+If a user reports an issue with:
+```java
+public class UserService {
+    public void processOrder(Order order) { ... }
+}
+```
+
+Don't write test harness code like:
+```java
+public class UserService {
+    public void processOrder(Order order) { ... }
+}
+```
+
+### ✅ Good Test Code
+Instead, write:
+```java
+public class ClassA {
+    public void methodOne(ClassB param) { ... }
+}
+
+public class ClassB {
+    String fieldA;
+}
+```
+
+## Rationale
+- Prevents false positives/negatives from name-based matching
+- Makes tests more generic and reusable
+- Clearly separates test infrastructure from examples
+- Reduces cognitive load when reviewing test code
+```
+
+### 3. Update .github/copilot-instructions.md
+
+Add to existing copilot instructions:
+
+```markdown
+## Test Harness Code Naming
+- When generating Java code for test harness, use meaningless, generic names.
+- Avoid using the same class/method/variable names as user-provided examples.
+- Use names like: `ClassA`, `ClassB`, `methodOne`, `varOne`, `tmpValue`.
+- Exception: Use real names for JDK/library APIs (`String`, `List`, `Map`, etc.).
+- This prevents tests from accidentally matching user examples.
+```
+
+### 4. Update Rule Authoring Guidelines
+
+If there are rule authoring guidelines (e.g., in `.codex/skills/rule-authoring/`), add:
+
+```markdown
+### Test Harness Naming
+When adding test harness code for rules:
+- Use generic class names: `ClassA`, `ClassB`, `TypeOne`
+- Use generic method names: `methodOne()`, `doSomething()`
+- Use generic variable names: `varOne`, `tmpValue`
+- Avoid meaningful domain names that might appear in user examples
+```
+
+## Implementation Steps
+1. Update AGENTS.md with test harness guidelines
+2. Create or update test harness naming documentation
+3. Update .github/copilot-instructions.md
+4. Review existing test harness code for examples to reference
+5. Consider adding a linter or checker for test code naming (optional)
+6. Update rule authoring checklist if it exists
+
+## Examples to Add to Documentation
+
+### Example 1: Nullness Rule Test
+```java
+// Generic test harness code
+public class ClassA {
+    @Nullable
+    String fieldOne;
+    
+    void methodOne(@NonNull ClassB param) {
+        fieldOne = param.methodTwo(); // potential nullness violation
+    }
+}
+
+public class ClassB {
+    @Nullable
+    String methodTwo() {
+        return null;
+    }
+}
+```
+
+### Example 2: Collection Rule Test
+```java
+// Generic test harness code
+import java.util.List;
+import java.util.Set;
+
+public class TypeOne {
+    List<TypeTwo> listField;  // OK - using real JDK type
+    Set<TypeTwo> setField;    // OK - using real JDK type
+    
+    void processData(TypeTwo item) {
+        listField.add(item);
+    }
+}
+
+public class TypeTwo {
+    int valueA;
+}
+```
+
+## Success Criteria
+- AGENTS.md includes explicit test harness naming guidelines
+- Documentation clearly explains why meaningless names are preferred
+- Examples demonstrate good and bad practices
+- Copilot instructions updated to follow the guideline
+- Future test harness code follows the convention
+
+## Estimated Complexity
+**Low** - Primarily documentation changes with clear guidelines.
