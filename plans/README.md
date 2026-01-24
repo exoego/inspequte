@@ -62,6 +62,10 @@ When creating a new plan:
 4. List all dependencies and prerequisites
 5. Consider edge cases and false positives
 
+When implementing a plan:
+1. **Remove the plan file** after the implementation is complete and merged
+2. This keeps the plans directory focused on upcoming work, not completed features
+
 ## License Considerations
 
 Some plans involve third-party resources:

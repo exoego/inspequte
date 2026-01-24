@@ -20,3 +20,9 @@
 - `MILESTONES.md` tracks milestones.
 - `Cargo.toml` declares the crate and `inspequte` binary.
 - `.github/workflows/ci.yml` builds, tests, and uploads release artifacts.
+- `plans/` directory contains implementation plans for future features.
+
+## Working with Plans
+- Review `plans/` directory for detailed implementation specifications before starting new features.
+- **When you complete a feature implementation, remove the corresponding plan file from `plans/`.**
+- This keeps the plans directory focused on upcoming work only.
