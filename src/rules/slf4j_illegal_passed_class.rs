@@ -302,7 +302,7 @@ public class LoggerFactory {
                 .to_string(),
             },
             SourceFile {
-                path: "com/example/Runner.java".to_string(),
+                path: "com/example/ClassA.java".to_string(),
                 contents: contents.to_string(),
             },
         ]
@@ -315,9 +315,9 @@ public class LoggerFactory {
 package com.example;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-class Bar {}
-public class Runner {
-    private final Logger logger = LoggerFactory.getLogger(Bar.class);
+class ClassB {}
+public class ClassA {
+    private final Logger fieldA = LoggerFactory.getLogger(ClassB.class);
 }
 "#,
         );
@@ -325,7 +325,7 @@ public class Runner {
         let messages = analyze_sources(sources);
 
         assert_eq!(messages.len(), 1);
-        assert!(messages.iter().any(|msg| msg.contains("Bar")));
+        assert!(messages.iter().any(|msg| msg.contains("ClassB")));
     }
 
     #[test]
@@ -335,14 +335,14 @@ public class Runner {
 package com.example;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-public class Runner {
-    private final Logger logger = LoggerFactory.getLogger(Runner.class);
-    public Logger build() {
+public class ClassA {
+    private final Logger fieldA = LoggerFactory.getLogger(ClassA.class);
+    public Logger methodOne() {
         return LoggerFactory.getLogger(getClass());
     }
-    static class Inner {
-        private final Logger logger = LoggerFactory.getLogger(Inner.class);
-        private final Logger outerLogger = LoggerFactory.getLogger(Runner.class);
+    static class ClassB {
+        private final Logger fieldA = LoggerFactory.getLogger(ClassB.class);
+        private final Logger fieldB = LoggerFactory.getLogger(ClassA.class);
     }
 }
 "#,

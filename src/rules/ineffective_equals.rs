@@ -165,13 +165,13 @@ mod tests {
     fn ineffective_equals_rule_reports_override_from_harness() {
         let harness = JvmTestHarness::new().expect("JAVA_HOME must be set for harness tests");
         let sources = vec![SourceFile {
-            path: "com/example/Value.java".to_string(),
+            path: "com/example/ClassA.java".to_string(),
             contents: r#"
 package com.example;
-public class Value {
+public class ClassA {
     @Override
-    public boolean equals(Object other) {
-        return other instanceof Value;
+    public boolean equals(Object varOne) {
+        return varOne instanceof ClassA;
     }
 }
 "#

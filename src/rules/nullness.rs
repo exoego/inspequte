@@ -1001,13 +1001,13 @@ public @interface NullnessUnspecified {}
     fn nullness_rule_reports_nonnull_return_from_marked_class() {
         let mut sources = jspecify_stubs();
         sources.push(SourceFile {
-            path: "com/example/Sample.java".to_string(),
+            path: "com/example/ClassA.java".to_string(),
             contents: r#"
 package com.example;
 import org.jspecify.annotations.NullMarked;
 @NullMarked
-public class Sample {
-    public String value() {
+public class ClassA {
+    public String methodOne() {
         return null;
     }
 }
@@ -1034,20 +1034,20 @@ public class Sample {
     fn nullness_flow_allows_receiver_after_non_null_check() {
         let mut sources = jspecify_stubs();
         sources.push(SourceFile {
-            path: "com/example/Sample.java".to_string(),
+            path: "com/example/ClassA.java".to_string(),
             contents: r#"
 package com.example;
 import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 @NullMarked
-class Node {
-    void setNext(@Nullable Node next) {}
+class ClassB {
+    void methodOne(@Nullable ClassB varOne) {}
 }
 @NullMarked
-public class Sample {
-    public void update(@Nullable Node prev, @Nullable Node next) {
-        if (prev != null) {
-            prev.setNext(next);
+public class ClassA {
+    public void methodOne(@Nullable ClassB varOne, @Nullable ClassB varTwo) {
+        if (varOne != null) {
+            varOne.methodOne(varTwo);
         }
     }
 }
@@ -1070,13 +1070,13 @@ public class Sample {
     fn nullness_rule_skips_unmarked_class_returning_null() {
         let mut sources = jspecify_stubs();
         sources.push(SourceFile {
-            path: "com/example/Sample.java".to_string(),
+            path: "com/example/ClassA.java".to_string(),
             contents: r#"
 package com.example;
 import org.jspecify.annotations.NullUnmarked;
 @NullUnmarked
-public class Sample {
-    public String value() {
+public class ClassA {
+    public String methodOne() {
         return null;
     }
 }
@@ -1096,14 +1096,14 @@ public class Sample {
     fn nullness_rule_allows_nullable_return_override() {
         let mut sources = jspecify_stubs();
         sources.push(SourceFile {
-            path: "com/example/Sample.java".to_string(),
+            path: "com/example/ClassA.java".to_string(),
             contents: r#"
 package com.example;
 import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 @NullMarked
-public class Sample {
-    public @Nullable String value() {
+public class ClassA {
+    public @Nullable String methodOne() {
         return null;
     }
 }
@@ -1123,14 +1123,14 @@ public class Sample {
     fn nullness_rule_reports_explicit_nonnull_return_in_unmarked_class() {
         let mut sources = jspecify_stubs();
         sources.push(SourceFile {
-            path: "com/example/Sample.java".to_string(),
+            path: "com/example/ClassA.java".to_string(),
             contents: r#"
 package com.example;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.NullUnmarked;
 @NullUnmarked
-public class Sample {
-    public @NonNull String value() {
+public class ClassA {
+    public @NonNull String methodOne() {
         return null;
     }
 }
@@ -1157,13 +1157,13 @@ public class Sample {
     fn nullness_rule_reports_nullable_parameter_receiver() {
         let mut sources = jspecify_stubs();
         sources.push(SourceFile {
-            path: "com/example/Sample.java".to_string(),
+            path: "com/example/ClassA.java".to_string(),
             contents: r#"
 package com.example;
 import org.jspecify.annotations.Nullable;
-public class Sample {
-    public static void use(@Nullable String value) {
-        value.toString();
+public class ClassA {
+    public static void methodOne(@Nullable String varOne) {
+        varOne.toString();
     }
 }
 "#
@@ -1189,13 +1189,13 @@ public class Sample {
     fn nullness_rule_allows_unspecified_parameter() {
         let mut sources = jspecify_stubs();
         sources.push(SourceFile {
-            path: "com/example/Sample.java".to_string(),
+            path: "com/example/ClassA.java".to_string(),
             contents: r#"
 package com.example;
 import org.jspecify.annotations.NullnessUnspecified;
-public class Sample {
-    public static void use(@NullnessUnspecified String value) {
-        value.toString();
+public class ClassA {
+    public static void methodOne(@NullnessUnspecified String varOne) {
+        varOne.toString();
     }
 }
 "#

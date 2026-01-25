@@ -19,6 +19,7 @@ See `references/rule-checklist.md` for a compact checklist.
 - Prefer local stub sources over downloading jars.
 - Filter SARIF results by `rule_id` for assertions.
 - Cover both happy-path and edge cases: include cases that should report, cases that should not report (false positives), and cases that should not miss reports (false negatives).
+- Use generic names in Java harness code (ex: `ClassA`, `methodOne`, `varOne`) and avoid names from user examples; keep real JDK/library API names where required.
 
 ### Harness test template
 ```rust

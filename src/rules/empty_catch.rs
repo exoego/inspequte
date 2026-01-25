@@ -189,15 +189,15 @@ mod tests {
     fn empty_catch_from_compiled_java() {
         let harness = JvmTestHarness::new().expect("JAVA_HOME must be set for harness tests");
         let sources = vec![SourceFile {
-            path: "example/EmptyCatchSample.java".to_string(),
+            path: "example/ClassA.java".to_string(),
             contents: r#"
 package example;
 
-public class EmptyCatchSample {
-    public void run() {
+public class ClassA {
+    public void methodOne() {
         try {
             throw new RuntimeException("boom");
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException varOne) {
         }
     }
 }

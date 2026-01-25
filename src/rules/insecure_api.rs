@@ -175,11 +175,11 @@ mod tests {
     fn insecure_api_rule_reports_runtime_exec_from_harness() {
         let harness = JvmTestHarness::new().expect("JAVA_HOME must be set for harness tests");
         let sources = vec![SourceFile {
-            path: "com/example/Runner.java".to_string(),
+            path: "com/example/ClassA.java".to_string(),
             contents: r#"
 package com.example;
-public class Runner {
-    public void run() throws Exception {
+public class ClassA {
+    public void methodOne() throws Exception {
         Runtime.getRuntime().exec("echo");
     }
 }

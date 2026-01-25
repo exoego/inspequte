@@ -85,7 +85,7 @@ public interface Logger {}
                 .to_string(),
             },
             SourceFile {
-                path: "com/example/Runner.java".to_string(),
+                path: "com/example/ClassA.java".to_string(),
                 contents: contents.to_string(),
             },
         ]
@@ -97,9 +97,9 @@ public interface Logger {}
             r#"
 package com.example;
 import org.slf4j.Logger;
-public class Runner {
-    public Logger logger;
-    Logger packageLogger;
+public class ClassA {
+    public Logger fieldA;
+    Logger fieldB;
 }
 "#,
         );
@@ -107,12 +107,8 @@ public class Runner {
         let messages = analyze_sources(sources);
 
         assert_eq!(messages.len(), 2);
-        assert!(messages.iter().any(|msg| msg.contains("Runner.logger")));
-        assert!(
-            messages
-                .iter()
-                .any(|msg| msg.contains("Runner.packageLogger"))
-        );
+        assert!(messages.iter().any(|msg| msg.contains("ClassA.fieldA")));
+        assert!(messages.iter().any(|msg| msg.contains("ClassA.fieldB")));
     }
 
     #[test]
@@ -121,8 +117,8 @@ public class Runner {
             r#"
 package com.example;
 import org.slf4j.Logger;
-public class Runner {
-    private Logger logger;
+public class ClassA {
+    private Logger fieldA;
 }
 "#,
         );

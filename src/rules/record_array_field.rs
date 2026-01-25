@@ -76,10 +76,10 @@ mod tests {
     #[test]
     fn record_array_field_reports_array_component() {
         let sources = vec![SourceFile {
-            path: "com/example/RecordWithArray.java".to_string(),
+            path: "com/example/ClassA.java".to_string(),
             contents: r#"
 package com.example;
-public record RecordWithArray(String[] values) {}
+public record ClassA(String[] varOne) {}
 "#
             .to_string(),
         }];
@@ -90,10 +90,10 @@ public record RecordWithArray(String[] values) {}
     #[test]
     fn record_array_field_ignores_non_array_component() {
         let sources = vec![SourceFile {
-            path: "com/example/RecordOk.java".to_string(),
+            path: "com/example/ClassB.java".to_string(),
             contents: r#"
 package com.example;
-public record RecordOk(String value) {}
+public record ClassB(String varOne) {}
 "#
             .to_string(),
         }];
@@ -104,13 +104,13 @@ public record RecordOk(String value) {}
     #[test]
     fn record_array_field_ignores_non_record_class() {
         let sources = vec![SourceFile {
-            path: "com/example/Plain.java".to_string(),
+            path: "com/example/ClassC.java".to_string(),
             contents: r#"
 package com.example;
-public class Plain {
-    private final String[] values;
-    public Plain(String[] values) {
-        this.values = values;
+public class ClassC {
+    private final String[] fieldA;
+    public ClassC(String[] varOne) {
+        this.fieldA = varOne;
     }
 }
 "#
@@ -123,11 +123,11 @@ public class Plain {
     #[test]
     fn record_array_field_ignores_static_array_field() {
         let sources = vec![SourceFile {
-            path: "com/example/RecordWithStatic.java".to_string(),
+            path: "com/example/ClassD.java".to_string(),
             contents: r#"
 package com.example;
-public record RecordWithStatic(String value) {
-    public static final String[] VALUES = new String[] {"a"};
+public record ClassD(String varOne) {
+    public static final String[] FIELD_A = new String[] {"a"};
 }
 "#
             .to_string(),

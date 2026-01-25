@@ -14,6 +14,13 @@
 - Run `cargo fmt` after each code modification.
 - Span naming convention: `scope.action` (e.g., `scan.jar`, `scan.class`).
 
+## Test Harness Guidelines
+- Use meaningless, generic names for variables and classes in test harness Java code.
+- Avoid using the same names as examples provided in issues or documentation.
+- Prefer names like: `ClassA`, `ClassB`, `MethodX`, `MethodY`, `varOne`, `varTwo`, `tmpValue`.
+- This prevents tests from accidentally passing due to name-based matching with user examples.
+- Exception: use meaningful names when testing actual JDK or library APIs (e.g., `String`, `List`, `Map`).
+
 ## Current scaffold
 - `README.md` includes goals, planned analyses, CLI usage, SARIF example, and CI snippet.
 - `CONTRIBUTING.md` covers Conventional Commits and AGPL contribution terms.

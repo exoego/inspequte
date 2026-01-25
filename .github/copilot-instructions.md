@@ -18,6 +18,12 @@
 - Commit style: Conventional Commits v1.0.0.
 - Span naming convention: `scope.action` (e.g., `scan.jar`, `scan.class`).
 
+## Test harness code naming
+- Use meaningless, generic names for Java harness code.
+- Avoid reusing class/method/variable names from user examples.
+- Prefer names like: `ClassA`, `ClassB`, `methodOne`, `varOne`, `tmpValue`.
+- Exception: use real names for JDK/library APIs (`String`, `List`, `Map`, etc.).
+
 ## Rule authoring expectations
 - Add doc comments to any new structs.
 - Keep harness tests in the same rule file (`#[cfg(test)]`).

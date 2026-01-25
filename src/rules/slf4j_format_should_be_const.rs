@@ -282,7 +282,7 @@ public interface Logger {
                 .to_string(),
             },
             SourceFile {
-                path: "com/example/Runner.java".to_string(),
+                path: "com/example/ClassA.java".to_string(),
                 contents: contents.to_string(),
             },
         ]
@@ -294,14 +294,14 @@ public interface Logger {
             r#"
 package com.example;
 import org.slf4j.Logger;
-public class Runner {
-    private final Logger logger;
-    public Runner(Logger logger) {
-        this.logger = logger;
+public class ClassA {
+    private final Logger fieldA;
+    public ClassA(Logger varOne) {
+        this.fieldA = varOne;
     }
-    public void run(String name) {
-        logger.info("Hello {}", name);
-        logger.info("Hello " + name, name);
+    public void methodOne(String varTwo) {
+        fieldA.info("Hello {}", varTwo);
+        fieldA.info("Hello " + varTwo, varTwo);
     }
 }
 "#,
@@ -319,18 +319,18 @@ public class Runner {
 package com.example;
 import org.slf4j.Logger;
 import org.slf4j.Marker;
-public class Runner {
-    private final Logger logger;
-    private final Marker marker;
-    public Runner(Logger logger, Marker marker) {
-        this.logger = logger;
-        this.marker = marker;
+public class ClassA {
+    private final Logger fieldA;
+    private final Marker fieldB;
+    public ClassA(Logger varOne, Marker varTwo) {
+        this.fieldA = varOne;
+        this.fieldB = varTwo;
     }
-    public void run(String name) {
-        logger.debug(marker, "Hello {}", name);
-        logger.debug(marker, "Hello " + name, name);
-        logger.info("prefix " + name);
-        logger.info("oops", new RuntimeException("boom"));
+    public void methodOne(String varThree) {
+        fieldA.debug(fieldB, "Hello {}", varThree);
+        fieldA.debug(fieldB, "Hello " + varThree, varThree);
+        fieldA.info("prefix " + varThree);
+        fieldA.info("oops", new RuntimeException("boom"));
     }
 }
 "#,

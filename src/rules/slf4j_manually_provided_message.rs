@@ -330,7 +330,7 @@ public interface Logger {
                 .to_string(),
             },
             SourceFile {
-                path: "com/example/Runner.java".to_string(),
+                path: "com/example/ClassA.java".to_string(),
                 contents: contents.to_string(),
             },
         ]
@@ -343,17 +343,17 @@ public interface Logger {
 package com.example;
 import org.slf4j.Logger;
 import org.slf4j.Marker;
-public class Runner {
-    private final Logger logger;
-    private final Marker marker;
-    public Runner(Logger logger, Marker marker) {
-        this.logger = logger;
-        this.marker = marker;
+public class ClassA {
+    private final Logger fieldA;
+    private final Marker fieldB;
+    public ClassA(Logger varOne, Marker varTwo) {
+        this.fieldA = varOne;
+        this.fieldB = varTwo;
     }
-    public void run(int value) {
-        logger.info(new StringBuilder().append("value=").append(value).toString());
-        logger.info(String.format("value=%s", value));
-        logger.debug(marker, new StringBuilder().append("value=").append(value).toString());
+    public void methodOne(int varThree) {
+        fieldA.info(new StringBuilder().append("value=").append(varThree).toString());
+        fieldA.info(String.format("value=%s", varThree));
+        fieldA.debug(fieldB, new StringBuilder().append("value=").append(varThree).toString());
     }
 }
 "#,
@@ -370,14 +370,14 @@ public class Runner {
             r#"
 package com.example;
 import org.slf4j.Logger;
-public class Runner {
-    private final Logger logger;
-    public Runner(Logger logger) {
-        this.logger = logger;
+public class ClassA {
+    private final Logger fieldA;
+    public ClassA(Logger varOne) {
+        this.fieldA = varOne;
     }
-    public void run(String message, int value) {
-        logger.info("value={}", value);
-        logger.info(message);
+    public void methodOne(String varTwo, int varThree) {
+        fieldA.info("value={}", varThree);
+        fieldA.info(varTwo);
     }
 }
 "#,

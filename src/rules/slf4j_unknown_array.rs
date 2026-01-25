@@ -317,7 +317,7 @@ public interface Logger {
                 .to_string(),
             },
             SourceFile {
-                path: "com/example/Runner.java".to_string(),
+                path: "com/example/ClassA.java".to_string(),
                 contents: contents.to_string(),
             },
         ]
@@ -330,16 +330,16 @@ public interface Logger {
 package com.example;
 import org.slf4j.Logger;
 import org.slf4j.Marker;
-public class Runner {
-    private final Logger logger;
-    private final Marker marker;
-    public Runner(Logger logger, Marker marker) {
-        this.logger = logger;
-        this.marker = marker;
+public class ClassA {
+    private final Logger fieldA;
+    private final Marker fieldB;
+    public ClassA(Logger varOne, Marker varTwo) {
+        this.fieldA = varOne;
+        this.fieldB = varTwo;
     }
-    public void run(Object[] argsArray) {
-        logger.info("{} {}", argsArray);
-        logger.debug(marker, "{}", argsArray);
+    public void methodOne(Object[] varThree) {
+        fieldA.info("{} {}", varThree);
+        fieldA.debug(fieldB, "{}", varThree);
     }
 }
 "#,
@@ -356,14 +356,14 @@ public class Runner {
             r#"
 package com.example;
 import org.slf4j.Logger;
-public class Runner {
-    private final Logger logger;
-    public Runner(Logger logger) {
-        this.logger = logger;
+public class ClassA {
+    private final Logger fieldA;
+    public ClassA(Logger varOne) {
+        this.fieldA = varOne;
     }
-    public void run(Object value) {
-        logger.info("{} {}", new Object[]{value, value});
-        logger.info("{} {}", "a", "b");
+    public void methodOne(Object varTwo) {
+        fieldA.info("{} {}", new Object[]{varTwo, varTwo});
+        fieldA.info("{} {}", "a", "b");
     }
 }
 "#,

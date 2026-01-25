@@ -327,12 +327,12 @@ mod tests {
     #[test]
     fn array_equals_reports_reference_comparison() {
         let sources = vec![SourceFile {
-            path: "com/example/Sample.java".to_string(),
+            path: "com/example/ClassA.java".to_string(),
             contents: r#"
 package com.example;
-public class Sample {
-    public boolean same(String[] left, String[] right) {
-        return left == right;
+public class ClassA {
+    public boolean methodOne(String[] varOne, String[] varTwo) {
+        return varOne == varTwo;
     }
 }
 "#
@@ -349,12 +349,12 @@ public class Sample {
     #[test]
     fn array_equals_reports_equals_call() {
         let sources = vec![SourceFile {
-            path: "com/example/Sample.java".to_string(),
+            path: "com/example/ClassA.java".to_string(),
             contents: r#"
 package com.example;
-public class Sample {
-    public boolean same(String[] left, String[] right) {
-        return left.equals(right);
+public class ClassA {
+    public boolean methodOne(String[] varOne, String[] varTwo) {
+        return varOne.equals(varTwo);
     }
 }
 "#
@@ -367,13 +367,13 @@ public class Sample {
     #[test]
     fn array_equals_ignores_arrays_equals_helper() {
         let sources = vec![SourceFile {
-            path: "com/example/Sample.java".to_string(),
+            path: "com/example/ClassA.java".to_string(),
             contents: r#"
 package com.example;
 import java.util.Arrays;
-public class Sample {
-    public boolean same(String[] left, String[] right) {
-        return Arrays.equals(left, right);
+public class ClassA {
+    public boolean methodOne(String[] varOne, String[] varTwo) {
+        return Arrays.equals(varOne, varTwo);
     }
 }
 "#
@@ -386,12 +386,12 @@ public class Sample {
     #[test]
     fn array_equals_ignores_object_reference_comparison() {
         let sources = vec![SourceFile {
-            path: "com/example/Sample.java".to_string(),
+            path: "com/example/ClassA.java".to_string(),
             contents: r#"
 package com.example;
-public class Sample {
-    public boolean same(Object left, Object right) {
-        return left == right;
+public class ClassA {
+    public boolean methodOne(Object varOne, Object varTwo) {
+        return varOne == varTwo;
     }
 }
 "#
@@ -404,12 +404,12 @@ public class Sample {
     #[test]
     fn array_equals_ignores_null_comparison() {
         let sources = vec![SourceFile {
-            path: "com/example/Sample.java".to_string(),
+            path: "com/example/ClassA.java".to_string(),
             contents: r#"
 package com.example;
-public class Sample {
-    public boolean same(String[] left) {
-        return left == null;
+public class ClassA {
+    public boolean methodOne(String[] varOne) {
+        return varOne == null;
     }
 }
 "#
@@ -422,14 +422,14 @@ public class Sample {
     #[test]
     fn array_equals_ignores_varargs_iteration_equals() {
         let sources = vec![SourceFile {
-            path: "com/example/Sample.java".to_string(),
+            path: "com/example/ClassA.java".to_string(),
             contents: r#"
 package com.example;
-class ClassDescriptor {}
-public class Sample {
-    public boolean isSubtype(ClassDescriptor subDesc, ClassDescriptor... superDesc) {
-        for (ClassDescriptor s : superDesc) {
-            if (subDesc.equals(s)) {
+class ClassB {}
+public class ClassA {
+    public boolean methodOne(ClassB varOne, ClassB... varTwo) {
+        for (ClassB varThree : varTwo) {
+            if (varOne.equals(varThree)) {
                 return true;
             }
         }
@@ -446,27 +446,27 @@ public class Sample {
     #[test]
     fn array_equals_ignores_array_element_equals_loop() {
         let sources = vec![SourceFile {
-            path: "com/example/Sample.java".to_string(),
+            path: "com/example/ClassA.java".to_string(),
             contents: r#"
 package com.example;
-class Type {}
-class Method {
-    public String getSignature() { return ""; }
+class ClassB {}
+class ClassC {
+    public String methodOne() { return ""; }
 }
-class TypeUtil {
-    static Type[] getArgumentTypes(String signature) { return new Type[0]; }
+class ClassD {
+    static ClassB[] methodTwo(String varOne) { return new ClassB[0]; }
 }
-public class Sample {
-    public Method find(Method m, Type[] subArgs) {
-        Type[] superArgs = TypeUtil.getArgumentTypes(m.getSignature());
-        if (subArgs.length == superArgs.length) {
+public class ClassA {
+    public ClassC methodThree(ClassC varOne, ClassB[] varTwo) {
+        ClassB[] varThree = ClassD.methodTwo(varOne.methodOne());
+        if (varTwo.length == varThree.length) {
             outer:
-            for (int j = 0; j < subArgs.length; j++) {
-                if (!superArgs[j].equals(subArgs[j])) {
+            for (int varFour = 0; varFour < varTwo.length; varFour++) {
+                if (!varThree[varFour].equals(varTwo[varFour])) {
                     continue outer;
                 }
             }
-            return m;
+            return varOne;
         }
         return null;
     }
