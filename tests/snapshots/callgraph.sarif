@@ -63,6 +63,13 @@
               }
             },
             {
+              "id": "INTERRUPTED_EXCEPTION_NOT_RESTORED",
+              "name": "InterruptedException not properly handled",
+              "shortDescription": {
+                "text": "Restore interrupt status when catching InterruptedException"
+              }
+            },
+            {
               "id": "NULLNESS",
               "name": "Nullness checks",
               "shortDescription": {

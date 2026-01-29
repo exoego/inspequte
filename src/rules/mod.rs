@@ -10,6 +10,7 @@ pub(crate) mod array_equals;
 pub(crate) mod empty_catch;
 pub(crate) mod ineffective_equals;
 pub(crate) mod insecure_api;
+pub(crate) mod interrupted_exception;
 pub(crate) mod nullness;
 pub(crate) mod prefer_enumset;
 pub(crate) mod record_array_field;
