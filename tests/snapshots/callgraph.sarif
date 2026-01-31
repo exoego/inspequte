@@ -195,7 +195,8 @@
                 "text": "SLF4J varargs calls with unknown argument arrays"
               }
             }
-          ]
+          ],
+          "semanticVersion": "0.9.0"
         }
       }
     }

@@ -521,16 +521,19 @@ fn build_sarif(
     results: Vec<SarifResult>,
 ) -> Sarif {
     with_span(telemetry, "sarif.build", &[], || {
+        let semantic_version = env!("CARGO_PKG_VERSION").to_string();
         let driver = if rules.is_empty() {
             ToolComponent::builder()
                 .name("inspequte")
                 .information_uri("https://github.com/KengoTODA/inspequte")
+                .semantic_version(semantic_version.clone())
                 .build()
         } else {
             ToolComponent::builder()
                 .name("inspequte")
                 .information_uri("https://github.com/KengoTODA/inspequte")
                 .rules(rules)
+                .semantic_version(semantic_version)
                 .build()
         };
         let tool = Tool {
@@ -649,6 +652,10 @@ mod tests {
         assert_eq!(value["version"], "2.1.0");
         assert_eq!(value["$schema"], SCHEMA_URL);
         assert_eq!(value["runs"][0]["tool"]["driver"]["name"], "inspequte");
+        assert_eq!(
+            value["runs"][0]["tool"]["driver"]["semanticVersion"],
+            env!("CARGO_PKG_VERSION")
+        );
         assert_eq!(
             value["runs"][0]["tool"]["driver"]["informationUri"],
             "https://github.com/KengoTODA/inspequte"
