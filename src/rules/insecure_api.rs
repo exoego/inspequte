@@ -23,6 +23,9 @@ impl Rule for InsecureApiRule {
     fn run(&self, context: &AnalysisContext) -> Result<Vec<SarifResult>> {
         let mut results = Vec::new();
         for class in &context.classes {
+            if !context.is_analysis_target_class(class) {
+                continue;
+            }
             let mut attributes = vec![KeyValue::new("inspequte.class", class.name.clone())];
             if let Some(uri) = context.class_artifact_uri(class) {
                 attributes.push(KeyValue::new("inspequte.artifact_uri", uri));
@@ -84,6 +87,7 @@ mod tests {
         CallKind, CallSite, Class, ControlFlowGraph, Method, MethodAccess, MethodNullness,
     };
     use crate::test_harness::{JvmTestHarness, Language, SourceFile};
+    use serde_sarif::sarif::{Artifact, ArtifactLocation, ArtifactRoles};
 
     fn empty_cfg() -> ControlFlowGraph {
         ControlFlowGraph {
@@ -126,8 +130,32 @@ mod tests {
         }
     }
 
+    fn class_with_methods_and_artifact(
+        name: &str,
+        artifact_index: i64,
+        methods: Vec<Method>,
+    ) -> Class {
+        Class {
+            name: name.to_string(),
+            super_name: None,
+            interfaces: Vec::new(),
+            referenced_classes: Vec::new(),
+            fields: Vec::new(),
+            methods,
+            artifact_index,
+            is_record: false,
+        }
+    }
+
     fn context_for(classes: Vec<Class>) -> crate::engine::AnalysisContext {
         build_context(classes, &[])
+    }
+
+    fn context_for_with_artifacts(
+        classes: Vec<Class>,
+        artifacts: Vec<Artifact>,
+    ) -> crate::engine::AnalysisContext {
+        build_context(classes, &artifacts)
     }
 
     #[test]
@@ -174,6 +202,59 @@ mod tests {
             .expect("insecure api rule run");
 
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn insecure_api_rule_skips_non_target_classes() {
+        let target_calls = vec![CallSite {
+            owner: "java/lang/Runtime".to_string(),
+            name: "exec".to_string(),
+            descriptor: "(Ljava/lang/String;)Ljava/lang/Process;".to_string(),
+            kind: CallKind::Virtual,
+            offset: 0,
+        }];
+        let dependency_calls = vec![CallSite {
+            owner: "java/lang/Class".to_string(),
+            name: "forName".to_string(),
+            descriptor: "(Ljava/lang/String;)Ljava/lang/Class;".to_string(),
+            kind: CallKind::Static,
+            offset: 0,
+        }];
+        let target_method = method_with("run", target_calls);
+        let dependency_method = method_with("helper", dependency_calls);
+        let classes = vec![
+            class_with_methods_and_artifact("com/example/App", 0, vec![target_method]),
+            class_with_methods_and_artifact("org/example/Lib", 1, vec![dependency_method]),
+        ];
+        let artifacts = vec![
+            Artifact::builder()
+                .location(
+                    ArtifactLocation::builder()
+                        .uri("file:///target/app.jar".to_string())
+                        .build(),
+                )
+                .roles(vec![
+                    serde_json::to_value(ArtifactRoles::AnalysisTarget)
+                        .expect("serialize artifact role"),
+                ])
+                .build(),
+            Artifact::builder()
+                .location(
+                    ArtifactLocation::builder()
+                        .uri("file:///deps/lib.jar".to_string())
+                        .build(),
+                )
+                .build(),
+        ];
+        let context = context_for_with_artifacts(classes, artifacts);
+
+        let results = InsecureApiRule
+            .run(&context)
+            .expect("insecure api rule run");
+
+        assert_eq!(results.len(), 1);
+        let message = results[0].message.text.as_deref().unwrap_or("");
+        assert!(message.contains("java/lang/Runtime.exec"));
     }
 
     #[test]
