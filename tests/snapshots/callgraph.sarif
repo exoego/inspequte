@@ -84,6 +84,13 @@
               }
             },
             {
+              "id": "LOG4J2_LOGGER_SHOULD_BE_PRIVATE",
+              "name": "Log4j2 logger should be private",
+              "shortDescription": {
+                "text": "Log4j2 Logger fields should be private"
+              }
+            },
+            {
               "id": "NULLNESS",
               "name": "Nullness checks",
               "shortDescription": {

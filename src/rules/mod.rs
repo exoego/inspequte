@@ -13,6 +13,7 @@ pub(crate) mod insecure_api;
 pub(crate) mod interrupted_exception;
 pub(crate) mod log4j2_format_should_be_const;
 pub(crate) mod log4j2_logger_should_be_final;
+pub(crate) mod log4j2_logger_should_be_private;
 pub(crate) mod nullness;
 pub(crate) mod prefer_enumset;
 pub(crate) mod record_array_field;
@@ -121,7 +122,7 @@ mod tests {
     fn all_rules_registers_expected_rules() {
         let rules = all_rules();
         // Verify we have the expected number of rules
-        assert_eq!(rules.len(), 18, "Expected 18 rules to be registered");
+        assert_eq!(rules.len(), 19, "Expected 19 rules to be registered");
 
         // Verify all rule IDs are unique
         let mut ids: Vec<_> = rules.iter().map(|r| r.metadata().id).collect();
@@ -143,6 +144,7 @@ mod tests {
             "INTERRUPTED_EXCEPTION_NOT_RESTORED",
             "LOG4J2_FORMAT_SHOULD_BE_CONST",
             "LOG4J2_LOGGER_SHOULD_BE_FINAL",
+            "LOG4J2_LOGGER_SHOULD_BE_PRIVATE",
             "NULLNESS",
             "PREFER_ENUMSET",
             "RECORD_ARRAY_FIELD",
