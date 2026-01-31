@@ -52,7 +52,8 @@ impl Rule for IneffectiveEqualsRule {
                                 class.name
                             ))
                         };
-                        let location = class_location(&class.name);
+                        let artifact_uri = context.class_artifact_uri(class);
+                        let location = class_location(&class.name, artifact_uri.as_deref());
                         class_results.push(
                             SarifResult::builder()
                                 .message(message)

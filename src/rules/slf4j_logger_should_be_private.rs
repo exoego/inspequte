@@ -48,7 +48,8 @@ impl Rule for Slf4jLoggerShouldBePrivateRule {
                             "Logger field should be private: {}.{}",
                             class.name, field.name
                         ));
-                        let location = class_location(&class.name);
+                        let artifact_uri = context.class_artifact_uri(class);
+                        let location = class_location(&class.name, artifact_uri.as_deref());
                         class_results.push(
                             SarifResult::builder()
                                 .message(message)

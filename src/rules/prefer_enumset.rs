@@ -75,7 +75,11 @@ impl Rule for PreferEnumSetRule {
             let class_results =
                 context.with_span("class", &attributes, || -> Result<Vec<SarifResult>> {
                     let mut class_results = Vec::new();
-                    class_results.extend(check_fields(class, &enums));
+                    class_results.extend(check_fields(
+                        class,
+                        &enums,
+                        context.class_artifact_uri(class).as_deref(),
+                    ));
                     class_results.extend(check_methods(class, &enums, artifact_uri.as_deref()));
                     Ok(class_results)
                 })?;
@@ -341,7 +345,11 @@ fn identify_enum_types(context: &AnalysisContext) -> BTreeSet<String> {
         .collect()
 }
 
-fn check_fields(class: &Class, enums: &BTreeSet<String>) -> Vec<SarifResult> {
+fn check_fields(
+    class: &Class,
+    enums: &BTreeSet<String>,
+    artifact_uri: Option<&str>,
+) -> Vec<SarifResult> {
     let mut results = Vec::new();
     for field in &class.fields {
         let Some(signature) = field.signature.as_deref() else {
@@ -359,7 +367,7 @@ fn check_fields(class: &Class, enums: &BTreeSet<String>) -> Vec<SarifResult> {
         results.push(
             SarifResult::builder()
                 .message(message)
-                .locations(vec![class_location(&class.name)])
+                .locations(vec![class_location(&class.name, artifact_uri)])
                 .build(),
         );
     }

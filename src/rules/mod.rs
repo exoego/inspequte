@@ -80,28 +80,32 @@ pub(crate) fn method_location_with_line(
     let logical = method_logical_location(class_name, method_name, descriptor);
     if let Some(uri) = artifact_uri {
         if uri.ends_with(".class") {
-            if let Some(container_uri) = jar_container_uri(uri) {
-                let artifact_location = ArtifactLocation::builder().uri(container_uri).build();
-                let physical = PhysicalLocation::builder()
+            let container_uri = jar_container_uri(uri);
+            let artifact_uri = container_uri.as_deref().unwrap_or(uri);
+            let artifact_location = ArtifactLocation::builder()
+                .uri(artifact_uri.to_string())
+                .build();
+            let physical = if container_uri.is_none() {
+                if let Some(line) = line {
+                    let region = Region::builder().start_line(line as i64).build();
+                    PhysicalLocation::builder()
+                        .artifact_location(artifact_location)
+                        .region(region)
+                        .build()
+                } else {
+                    PhysicalLocation::builder()
+                        .artifact_location(artifact_location)
+                        .build()
+                }
+            } else {
+                PhysicalLocation::builder()
                     .artifact_location(artifact_location)
-                    .build();
-                return Location::builder()
-                    .logical_locations(vec![logical])
-                    .physical_location(physical)
-                    .build();
-            }
-            if let Some(line) = line {
-                let region = Region::builder().start_line(line as i64).build();
-                let artifact_location = ArtifactLocation::builder().uri(uri.to_string()).build();
-                let physical = PhysicalLocation::builder()
-                    .artifact_location(artifact_location)
-                    .region(region)
-                    .build();
-                return Location::builder()
-                    .logical_locations(vec![logical])
-                    .physical_location(physical)
-                    .build();
-            }
+                    .build()
+            };
+            return Location::builder()
+                .logical_locations(vec![logical])
+                .physical_location(physical)
+                .build();
         }
     }
     Location::builder().logical_locations(vec![logical]).build()
@@ -124,11 +128,27 @@ pub(crate) fn method_logical_location(
         .build()
 }
 
-pub(crate) fn class_location(class_name: &str) -> Location {
+pub(crate) fn class_location(class_name: &str, artifact_uri: Option<&str>) -> Location {
     let logical = LogicalLocation::builder()
         .name(class_name)
         .kind("type")
         .build();
+    if let Some(uri) = artifact_uri {
+        if uri.ends_with(".class") {
+            let container_uri = jar_container_uri(uri);
+            let artifact_uri = container_uri.as_deref().unwrap_or(uri);
+            let artifact_location = ArtifactLocation::builder()
+                .uri(artifact_uri.to_string())
+                .build();
+            let physical = PhysicalLocation::builder()
+                .artifact_location(artifact_location)
+                .build();
+            return Location::builder()
+                .logical_locations(vec![logical])
+                .physical_location(physical)
+                .build();
+        }
+    }
     Location::builder().logical_locations(vec![logical]).build()
 }
 
