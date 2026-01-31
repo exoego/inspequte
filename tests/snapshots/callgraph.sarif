@@ -98,6 +98,13 @@
               }
             },
             {
+              "id": "LOG4J2_MANUALLY_PROVIDED_MESSAGE",
+              "name": "Log4j2 preformatted message",
+              "shortDescription": {
+                "text": "Log4j2 messages should use placeholders instead of manual formatting"
+              }
+            },
+            {
               "id": "NULLNESS",
               "name": "Nullness checks",
               "shortDescription": {
