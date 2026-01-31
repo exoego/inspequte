@@ -105,6 +105,13 @@
               }
             },
             {
+              "id": "LOG4J2_SIGN_ONLY_FORMAT",
+              "name": "Log4j2 placeholder-only format",
+              "shortDescription": {
+                "text": "Log4j2 format strings should include descriptive text"
+              }
+            },
+            {
               "id": "NULLNESS",
               "name": "Nullness checks",
               "shortDescription": {
