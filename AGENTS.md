@@ -34,3 +34,11 @@
 - **When you complete a feature implementation, rename the corresponding plan file with a `.done.md` suffix.**
   - Example: `01-foo.md` → `01.foo.done.md`
 - This marks completed work while preserving the implementation history.
+- **Add a short post-mortem to completed plan files.**
+  - Include 2-3 bullets: what went well, what was tricky, and any follow-ups.
+
+## Release checklist
+- Always run `cargo test`.
+- Add/maintain SARIF sanity checks via tests.
+- Document any new telemetry attributes.
+- Update `README.md`/`CONTRIBUTING.md` if CLI behavior or rule coverage changed.
