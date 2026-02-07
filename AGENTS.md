@@ -13,6 +13,7 @@
 - Use release-please with crates.io trusted publisher (OIDC).
 - Run `cargo fmt` after each code modification.
 - Span naming convention: `scope.action` (e.g., `scan.jar`, `scan.class`).
+- Rule messages for users must be intuitive and actionable: clearly state the problem and what to do to fix it.
 
 ## Test Harness Guidelines
 - Use meaningless, generic names for variables and classes in test harness Java code.
@@ -39,6 +40,8 @@
 
 ## Release checklist
 - Always run `cargo test`.
+- Verify with `cargo build`, `cargo test`, and `cargo audit --format sarif`.
+- Install `cargo-audit` as needed via `cargo install cargo-audit --locked` before running `cargo audit`.
 - Add/maintain SARIF sanity checks via tests.
 - Document any new telemetry attributes.
 - Update `README.md`/`CONTRIBUTING.md` if CLI behavior or rule coverage changed.

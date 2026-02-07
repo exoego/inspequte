@@ -7,13 +7,14 @@ description: Create or update inspequte analysis rules and harness-based tests. 
 
 ## Workflow
 1) Define rule metadata: unique `id`, clear `name`, and short `description`.
-2) Add `#[derive(Default)]` to the rule struct (required for automatic registration).
-3) Add `crate::register_rule!(RuleName);` after the struct declaration to enable automatic discovery.
-4) Implement `Rule::run` using `AnalysisContext` and helpers from `crate::rules` (ex: `result_message`, `method_location_with_line`, `class_location`). Always guard rule scans with `if !context.is_analysis_target_class(class) { continue; }` so classpath-only classes are skipped.
-5) Add harness tests in the same rule file (`#[cfg(test)]`): compile Java sources with `JvmTestHarness`, analyze, then assert on `rule_id` and message text.
-6) Declare the new rule module in `src/rules/mod.rs` (ex: `pub(crate) mod my_new_rule;`).
-7) Update SARIF snapshot tests if rule list changes (see `tests/snapshots/` and `INSPEQUTE_UPDATE_SNAPSHOTS=1 cargo test sarif_callgraph_snapshot`).
-8) Keep output deterministic (results are sorted by `rule_id`/message; avoid non-deterministic ordering in rule code).
+2) Write rule messages for end users so they are intuitive and actionable: explain what is wrong and what to change to fix it.
+3) Add `#[derive(Default)]` to the rule struct (required for automatic registration).
+4) Add `crate::register_rule!(RuleName);` after the struct declaration to enable automatic discovery.
+5) Implement `Rule::run` using `AnalysisContext` and helpers from `crate::rules` (ex: `result_message`, `method_location_with_line`, `class_location`). Always guard rule scans with `if !context.is_analysis_target_class(class) { continue; }` so classpath-only classes are skipped.
+6) Add harness tests in the same rule file (`#[cfg(test)]`): compile Java sources with `JvmTestHarness`, analyze, then assert on `rule_id` and message text.
+7) Declare the new rule module in `src/rules/mod.rs` (ex: `pub(crate) mod my_new_rule;`).
+8) Update SARIF snapshot tests if rule list changes (see `tests/snapshots/` and `INSPEQUTE_UPDATE_SNAPSHOTS=1 cargo test sarif_callgraph_snapshot`).
+9) Keep output deterministic (results are sorted by `rule_id`/message; avoid non-deterministic ordering in rule code).
 
 **Note:** Rules are automatically discovered and registered at compile time using the `inventory` crate. No manual registration in `src/engine.rs` is needed.
 
@@ -80,3 +81,5 @@ assert!(messages.iter().any(|msg| msg.contains("expected")));
 - Keep tests in the rule file to avoid a massive shared test module.
 - Use ASCII-only edits unless the file already uses Unicode.
 - Add doc comments to any new structs.
+- Verify changes with `cargo build`, `cargo test`, and `cargo audit --format sarif`.
+- If `cargo audit` is unavailable, install it first via `cargo install cargo-audit --locked`.
