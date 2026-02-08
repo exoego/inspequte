@@ -185,6 +185,3 @@ tasks.register<Exec>("inspequte") {
 
 ## License
 AGPL-3.0. See `LICENSE`.
-
-## Contributing
-Please follow Conventional Commits 1.0.0. See `CONTRIBUTING.md`.
