@@ -92,7 +92,8 @@ jobs:
 
           mkdir -p dist
           cp "target/${target}/release/${binary}" "dist/${binary}"
-          tar -C dist -czf "${archive}" "${binary}"
+          cp "README.md" "dist/README.md"
+          tar -C dist -czf "${archive}" "${binary}" "README.md"
       - name: Archive binary (windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -104,7 +105,8 @@ jobs:
 
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           Copy-Item "target/$target/release/$binary" "dist/$binary" -Force
-          Compress-Archive -Path "dist/$binary" -DestinationPath $archive -Force
+          Copy-Item "README.md" "dist/README.md" -Force
+          Compress-Archive -Path "dist/$binary", "dist/README.md" -DestinationPath $archive -Force
       - name: Upload release asset
         env:
           GH_TOKEN: ${{ github.token }}
