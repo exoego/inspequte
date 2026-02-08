@@ -35,6 +35,49 @@ The name combines "inspect" and "cute". The CLI command is `inspequte`.
   compiled with debug symbols (for example, `javac -g`). Field and method
   signatures are still analyzed without debug info.
 
+## Install
+Install from crates.io:
+```bash
+cargo install inspequte --locked
+```
+
+Install a pre-built binary from GitHub Releases:
+- Linux (x86_64): `inspequte-<TAG>-x86_64-unknown-linux-gnu.tar.gz`
+- macOS (Apple Silicon): `inspequte-<TAG>-aarch64-apple-darwin.tar.gz`
+- Windows (x86_64): `inspequte-<TAG>-x86_64-pc-windows-msvc.zip`
+
+Example for Linux/macOS:
+```bash
+TAG="$(gh release list --repo KengoTODA/inspequte --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName')"
+TARGET="aarch64-apple-darwin" # use x86_64-unknown-linux-gnu on Linux
+curl -fL -o inspequte.tar.gz \
+  "https://github.com/KengoTODA/inspequte/releases/download/${TAG}/inspequte-${TAG}-${TARGET}.tar.gz"
+tar -xzf inspequte.tar.gz
+chmod +x inspequte
+sudo mv inspequte /usr/local/bin/inspequte
+```
+
+Example for Windows (PowerShell):
+```powershell
+$Tag = gh release list --repo KengoTODA/inspequte --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName'
+$Asset = "inspequte-$Tag-x86_64-pc-windows-msvc.zip"
+Invoke-WebRequest -Uri "https://github.com/KengoTODA/inspequte/releases/download/$Tag/$Asset" -OutFile "inspequte.zip"
+Expand-Archive -Path "inspequte.zip" -DestinationPath "."
+# Move to a directory included in PATH
+Move-Item ".\\inspequte.exe" "$HOME\\bin\\inspequte.exe" -Force
+```
+
+### macOS note (Gatekeeper for downloaded executables)
+macOS can block directly executing binaries downloaded from the internet (Gatekeeper/quarantine behavior).
+Follow Apple's official guidance to allow the executable:
+- [Gatekeeper and runtime protection](https://support.apple.com/guide/security/gatekeeper-and-runtime-protection-sec5599b66df/web)
+- [Open a Mac app from an unknown developer](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac)
+
+For terminal tools, after confirming the binary source from the official release, you can remove the quarantine attribute:
+```bash
+xattr -d com.apple.quarantine /usr/local/bin/inspequte
+```
+
 ## CLI usage
 ```
 inspequte --input app.jar --classpath lib/ --output results.sarif
