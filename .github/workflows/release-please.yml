@@ -85,7 +85,7 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             bin_suffix: ""
-          - os: ubuntu-latest-arm
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             bin_suffix: ""
           - os: macos-latest
