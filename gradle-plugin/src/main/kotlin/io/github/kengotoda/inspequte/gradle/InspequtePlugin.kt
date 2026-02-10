@@ -5,7 +5,6 @@ import org.gradle.api.Project
 import org.gradle.api.plugins.JavaBasePlugin
 import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.api.provider.Provider
-import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.SourceSet
 import org.gradle.kotlin.dsl.getByType
 import org.gradle.kotlin.dsl.register
@@ -16,11 +15,12 @@ import org.gradle.kotlin.dsl.register
 class InspequtePlugin : Plugin<Project> {
     override fun apply(project: Project) {
         val inspequteAvailable = project.providers.of(InspequteAvailableValueSource::class.java) {}
+        val extension = project.extensions.create("inspequte", InspequteExtension::class.java)
 
         project.pluginManager.withPlugin("java-base") {
             val javaExtension = project.extensions.getByType<JavaPluginExtension>()
             javaExtension.sourceSets.configureEach {
-                configureInspequteForSourceSet(project, this, inspequteAvailable)
+                configureInspequteForSourceSet(project, this, inspequteAvailable, extension)
             }
         }
     }
@@ -28,7 +28,8 @@ class InspequtePlugin : Plugin<Project> {
     private fun configureInspequteForSourceSet(
         project: Project,
         sourceSet: SourceSet,
-        inspequteAvailable: Provider<Boolean>
+        inspequteAvailable: Provider<Boolean>,
+        extension: InspequteExtension
     ) {
         val outputDir = project.layout.buildDirectory.dir("inspequte/${sourceSet.name}")
         val writeInputsTaskName = sourceSet.getTaskName("writeInspequteInputs", null)
@@ -44,7 +45,7 @@ class InspequtePlugin : Plugin<Project> {
             description = "Writes inspequte input files for the '${sourceSet.name}' source set."
         }
 
-        val inspequteTask = project.tasks.register<Exec>(inspequteTaskName) {
+        val inspequteTask = project.tasks.register<InspequteTask>(inspequteTaskName) {
             dependsOn(writeInputsTask)
             group = JavaBasePlugin.VERIFICATION_GROUP
             description = "Runs inspequte for the '${sourceSet.name}' source set."
@@ -52,6 +53,7 @@ class InspequtePlugin : Plugin<Project> {
             val reportFile = outputDir.map { it.file("report.sarif") }
             inputs.files(writeInputsTask.flatMap { it.inputsFile }, writeInputsTask.flatMap { it.classpathFile })
             outputs.file(reportFile)
+            otel.convention(extension.otel)
 
             onlyIf {
                 val available = inspequteAvailable.get()
@@ -65,7 +67,7 @@ class InspequtePlugin : Plugin<Project> {
             }
 
             executable("inspequte")
-            argumentProviders.add(InspequteArgumentProvider(writeInputsTask, reportFile))
+            argumentProviders.add(InspequteArgumentProvider(writeInputsTask, reportFile, otel))
         }
 
         project.tasks.named(JavaBasePlugin.CHECK_TASK_NAME) {

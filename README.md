@@ -104,6 +104,11 @@ plugins {
     id("io.github.kengotoda.inspequte") version "<VERSION>"
 }
 
+inspequte {
+    // Optional: forward OTLP collector URL to inspequte via --otel
+    otel.set("http://localhost:4318/v1/traces")
+}
+
 // Registered automatically:
 // - writeInspequteInputs / writeInspequteInputsTest
 // - inspequte / inspequteTest
@@ -113,6 +118,8 @@ plugins {
 
 The plugin hooks all generated `inspequte*` tasks into `check`.
 The `inspequte` command must be available in `PATH`.
+You can also pass the collector URL from CLI for a task run:
+`./gradlew inspequte --inspequte-otel http://localhost:8080`
 
 ## SARIF output (example)
 ```json
