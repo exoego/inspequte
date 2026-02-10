@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.15.0](https://github.com/KengoTODA/inspequte/compare/inspequte-v0.14.0...inspequte-v0.15.0) (2026-02-10)
+
+
+### Features
+
+* **gradle-plugin:** add optional otel collector setting ([f98efd2](https://github.com/KengoTODA/inspequte/commit/f98efd253e6b8d263f8920de2bdfa785db08d7c8))
+
+
+### Bug Fixes
+
+* add intel macOS release binary build ([6f13e0a](https://github.com/KengoTODA/inspequte/commit/6f13e0a03283711d1fd18192b9ad7b1143b99f65))
+* add linux arm64 release binary build ([8cf97bc](https://github.com/KengoTODA/inspequte/commit/8cf97bc966c21fe78f52c93e2308706836a80c0d))
+* **rules:** avoid slf4j false positive for kotlin reified logger ([616c75d](https://github.com/KengoTODA/inspequte/commit/616c75dfe7e2bb011dc7bfdbf491577e93caf088))
+* **rules:** ignore kotlin enum when mapping in empty catch ([3575e6a](https://github.com/KengoTODA/inspequte/commit/3575e6a24ae5ef9b66c8866f54bef77bc969cbf6))
+
 ## [0.14.0](https://github.com/KengoTODA/inspequte/compare/inspequte-v0.13.1...inspequte-v0.14.0) (2026-02-09)
 
 
