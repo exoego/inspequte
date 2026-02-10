@@ -36,7 +36,12 @@ The name combines "inspect" and "cute". The CLI command is `inspequte`.
   signatures are still analyzed without debug info.
 
 ## Install
-Install a pre-built binary from GitHub Releases:
+Install with Homebrew tap:
+```bash
+brew install KengoTODA/tap/inspequte
+```
+
+Or install a pre-built binary from GitHub Releases:
 - Linux (x86_64): `inspequte-<TAG>-x86_64-unknown-linux-gnu.tar.gz`
 - Linux (ARM64): `inspequte-<TAG>-aarch64-unknown-linux-gnu.tar.gz`
 - macOS (Apple Silicon): `inspequte-<TAG>-aarch64-apple-darwin.tar.gz`
@@ -64,7 +69,7 @@ Expand-Archive -Path "inspequte.zip" -DestinationPath "."
 Move-Item ".\\inspequte.exe" "$HOME\\bin\\inspequte.exe" -Force
 ```
 
-### macOS note (Gatekeeper for downloaded executables)
+### macOS note for manual binary downloads (Gatekeeper)
 macOS can block directly executing binaries downloaded from the internet (Gatekeeper/quarantine behavior).
 Follow Apple's official guidance to allow the executable:
 - [Gatekeeper and runtime protection](https://support.apple.com/guide/security/gatekeeper-and-runtime-protection-sec5599b66df/web)
