@@ -23,7 +23,7 @@ The name combines "inspect" and "cute". The CLI command is `inspequte`.
 
 ## Goals
 - Fast startup and analysis for CI pipelines.
-- No IDE or build-tool integration required.
+- No IDE integration required.
 - Deterministic SARIF v2.1.0 output for LLM-friendly automation.
 
 ## Bytecode/JDK compatibility
