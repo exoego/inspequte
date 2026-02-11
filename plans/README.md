@@ -35,7 +35,7 @@ Each plan file documents:
    - Prevent name collisions with user examples
    - Complexity: **Low**
 
-5. **[05-prefer-enumset-rule.md](05-prefer-enumset-rule.md)**
+5. **[prefer_enumset/plan.md](../src/rules/prefer_enumset/plan.md)**
    - Rule to prefer `EnumSet` over `HashSet`, `ArrayList`, etc. for enum types
    - Performance optimization recommendation
    - Complexity: **Medium**
