@@ -12,6 +12,7 @@ Use stage-specific prompts to reduce context mixing:
 1. Run ideation (`prompts/ideate-rule.md`) to get:
    - `rule-id`
    - `rule idea`
+   - while referencing `prompts/references/no-go-history.md` to avoid duplicate ideas
 2. Run plan (`prompts/authoring-plan.md`) with those inputs.
 3. Run spec (`prompts/authoring-spec.md`) with those inputs.
 4. Run implementation (`prompts/authoring-impl.md`) based on `spec.md`.

@@ -2,6 +2,11 @@
 
 You are generating exactly one new static-analysis rule idea for inspequte.
 
+## Required references
+- Read `prompts/references/no-go-history.md` if the file exists.
+- Treat past `No-Go` entries as rejected directions unless your idea is materially different.
+- Avoid duplicate or near-duplicate proposals by both `rule-id` and semantic intent.
+
 ## Goal
 Propose one idea that should become input for the plan skill:
 - `rule-id`

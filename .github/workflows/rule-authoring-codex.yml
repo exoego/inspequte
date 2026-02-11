@@ -8,20 +8,16 @@ on:
         required: false
         default: ""
         type: string
-      push_if_go:
-        description: "Commit and push when verify recommendation is Go"
-        required: false
-        default: true
-        type: boolean
 
 env:
   BASE_REF: ${{ inputs.base_ref }}
+  NO_GO_HISTORY_PATH: prompts/references/no-go-history.md
 
 # Design intent for 4 Codex phases:
 # - phase1 (ideate+plan): establish one deterministic target and plan artifact.
 # - phase2 (spec): lock the contract before implementation.
 # - phase3 (impl): implement against fixed spec with test feedback.
-# - phase4 (verify): evaluate only verify-input evidence and gate commit/push.
+# - phase4 (verify): evaluate only verify-input evidence and gate PR finalization.
 # Splitting phases reduces prompt/context mixing and makes each artifact auditable.
 jobs:
   phase1_ideate_plan:
@@ -42,6 +38,12 @@ jobs:
         run: |
           mkdir -p target/codex-workflow/prompts
           mkdir -p target/codex-workflow/output
+          default_branch="${{ github.event.repository.default_branch }}"
+          git fetch --quiet origin "${default_branch}"
+          if git show "origin/${default_branch}:${NO_GO_HISTORY_PATH}" > /tmp/no-go-history.md 2>/dev/null; then
+            mkdir -p "$(dirname "${NO_GO_HISTORY_PATH}")"
+            mv /tmp/no-go-history.md "${NO_GO_HISTORY_PATH}"
+          fi
           find src/rules -mindepth 2 -maxdepth 2 -name plan.md | LC_ALL=C sort > target/codex-workflow/baseline-plan-files.txt
 
       - name: Write phase-1 prompt (ideate + plan)
@@ -55,6 +57,8 @@ jobs:
 
           Phase scope:
           1. Ideate one rule (`rule-id`, `rule idea`) based on `./prompts/ideate-rule.md`.
+             - Read and use `./prompts/references/no-go-history.md` if present.
+             - Avoid duplicate or near-duplicate ideas listed in the No-Go history.
           2. Create `src/rules/<RULE_ID>/plan.md` based on `./prompts/authoring-plan.md`.
           3. Do not create or modify `spec.md` in this phase.
           4. Do not implement or verify in this phase.
@@ -125,6 +129,7 @@ jobs:
         run: |
           set -euo pipefail
           git add -A
+          git reset -- "${NO_GO_HISTORY_PATH}" >/dev/null 2>&1 || true
           git diff --cached --binary > target/codex-workflow/output/phase1-cumulative.patch
 
       - name: Upload phase-1 artifacts
@@ -137,6 +142,7 @@ jobs:
             target/codex-workflow/output/phase1-final-message.txt
             target/codex-workflow/output/rule-meta.txt
             target/codex-workflow/output/phase1-cumulative.patch
+            prompts/references/no-go-history.md
             src/rules/${{ steps.rule_meta.outputs.rule_id }}/plan.md
           if-no-files-found: warn
 
@@ -244,6 +250,7 @@ jobs:
       contents: read
     outputs:
       rule_id: ${{ needs.phase2_spec.outputs.rule_id }}
+      rule_idea: ${{ needs.phase2_spec.outputs.rule_idea }}
     steps:
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -391,15 +398,101 @@ jobs:
             verify-input/
           if-no-files-found: warn
 
-  phase4_verify:
+  pr_open:
     runs-on: ubuntu-latest
     needs: phase3_impl
+    environment: codex
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      pr_number: ${{ steps.create_pr.outputs.pr_number }}
+      pr_url: ${{ steps.create_pr.outputs.pr_url }}
+      branch_name: ${{ steps.create_pr.outputs.branch_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download phase-3 artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: codex-phase3
+          path: target/codex-workflow/from-phase3
+
+      - name: Apply cumulative patch from phase3
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch_file="target/codex-workflow/from-phase3/target/codex-workflow/output/phase3-cumulative.patch"
+          if [[ ! -f "${patch_file}" ]]; then
+            echo "Missing patch: ${patch_file}" >&2
+            exit 1
+          fi
+          if [[ -s "${patch_file}" ]]; then
+            git apply --whitespace=nowarn "${patch_file}"
+          else
+            echo "phase3 patch is empty; skipping apply."
+          fi
+
+      - name: Create app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.APP_ID_CODEX }}
+          private-key: ${{ secrets.PRIVATE_KEY_CODEX }}
+
+      - name: Commit, push, and create PR
+        id: create_pr
+        env:
+          RULE_ID: ${{ needs.phase3_impl.outputs.rule_id }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [[ -z "$(git status --porcelain)" ]]; then
+            echo "No changes found after phase3; PR cannot be created." >&2
+            exit 1
+          fi
+
+          branch_name="codex/${RULE_ID}-${GITHUB_RUN_ID}"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          git switch -c "${branch_name}"
+          git add -A
+          git commit -m "feat(rules): add ${RULE_ID} via codex workflow"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --set-upstream origin "${branch_name}"
+
+          pr_url="$(gh pr create \
+            --base "${DEFAULT_BRANCH}" \
+            --head "${branch_name}" \
+            --title "feat(rules): add ${RULE_ID}" \
+            --body "Generated by rule-authoring-codex workflow run: ${run_url}")"
+          pr_number="$(gh pr view "${pr_url}" --json number --jq '.number')"
+
+          {
+            echo "branch_name=${branch_name}"
+            echo "pr_url=${pr_url}"
+            echo "pr_number=${pr_number}"
+          } >> "${GITHUB_OUTPUT}"
+
+  phase4_verify:
+    runs-on: ubuntu-latest
+    needs: [phase3_impl, pr_open]
     permissions:
       contents: read
     outputs:
       rule_id: ${{ needs.phase3_impl.outputs.rule_id }}
+      rule_idea: ${{ needs.phase3_impl.outputs.rule_idea }}
       recommendation: ${{ steps.verify_gate.outputs.recommendation }}
-      adopt: ${{ steps.verify_gate.outputs.adopt }}
     steps:
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -489,14 +582,8 @@ jobs:
             fi
           fi
 
-          adopt="false"
-          if [[ "${recommendation}" == "Go" ]]; then
-            adopt="true"
-          fi
-
           {
             echo "recommendation=${recommendation}"
-            echo "adopt=${adopt}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Capture cumulative patch (phase4)
@@ -525,21 +612,33 @@ jobs:
             echo "## Codex rule authoring workflow"
             echo ""
             echo "- rule-id: \`${{ needs.phase3_impl.outputs.rule_id || 'unknown' }}\`"
+            echo "- pr-number: \`${{ needs.pr_open.outputs.pr_number || 'unknown' }}\`"
             echo "- recommendation: \`${{ steps.verify_gate.outputs.recommendation || 'unknown' }}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  commit_push:
+  pr_finalize:
     runs-on: ubuntu-latest
-    needs: phase4_verify
-    if: needs.phase4_verify.outputs.adopt == 'true' && inputs.push_if_go == true
+    needs: [phase4_verify, pr_open]
+    if: always() && needs.phase4_verify.result == 'success' && needs.pr_open.result == 'success'
+    environment: codex
     permissions:
       contents: write
+      pull-requests: write
     steps:
-      - name: Checkout
+      - name: Create app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.APP_ID_CODEX }}
+          private-key: ${{ secrets.PRIVATE_KEY_CODEX }}
+
+      - name: Checkout default branch
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Download phase-4 artifacts
         uses: actions/download-artifact@v5
@@ -547,43 +646,136 @@ jobs:
           name: codex-phase4
           path: target/codex-workflow/from-phase4
 
-      - name: Apply cumulative patch from phase4
+      - name: Extract No-Go reason summary
+        id: no_go_summary
+        if: needs.phase4_verify.outputs.recommendation == 'No-Go'
         shell: bash
         run: |
           set -euo pipefail
-          patch_file="target/codex-workflow/from-phase4/target/codex-workflow/output/phase4-cumulative.patch"
-          if [[ ! -f "${patch_file}" ]]; then
-            echo "Missing patch: ${patch_file}" >&2
-            exit 1
-          fi
-          if [[ -s "${patch_file}" ]]; then
-            git apply --whitespace=nowarn "${patch_file}"
-          else
-            echo "phase4 patch is empty; skipping apply."
+          report_path="target/codex-workflow/from-phase4/verify-input/verify-report.md"
+          reason=""
+          if [[ -f "${report_path}" ]]; then
+            reason="$(awk '
+              /^## Recommendation \(Go\/No-Go\)/ {exit}
+              /^## / {in_section=1; next}
+              in_section == 1 {
+                line=$0
+                gsub(/\r/, "", line)
+                if (line ~ /^[[:space:]]*$/) next
+                sub(/^[[:space:]]*[-*][[:space:]]*/, "", line)
+                if (line ~ /^No findings/ || line ~ /^None\.?$/) next
+                print line
+                exit
+              }
+            ' "${report_path}" | sed -E 's/[[:space:]]+/ /g; s/[[:space:]]+$//')"
           fi
 
-      - name: Create app token
-        id: app-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ vars.APP_ID }}
-          private-key: ${{ secrets.PRIVATE_KEY }}
+          if [[ -z "${reason}" ]]; then
+            reason="Verification returned No-Go. Inspect verify-input/verify-report.md for details."
+          fi
 
-      - name: Commit and push
+          {
+            echo "reason<<EOF"
+            echo "${reason}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Record No-Go history on default branch
+        if: needs.phase4_verify.outputs.recommendation == 'No-Go'
         env:
           RULE_ID: ${{ needs.phase4_verify.outputs.rule_id }}
-          GH_APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          RULE_IDEA: ${{ needs.phase4_verify.outputs.rule_idea }}
+          NO_GO_REASON: ${{ steps.no_go_summary.outputs.reason }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
-          if [[ -z "$(git status --porcelain)" ]]; then
-            echo "No changes to commit."
-            exit 0
+          mkdir -p "$(dirname "${NO_GO_HISTORY_PATH}")"
+          if [[ ! -f "${NO_GO_HISTORY_PATH}" ]]; then
+            {
+              echo "# Rule Ideation No-Go History"
+              echo ""
+              echo "This reference is used by \`prompts/ideate-rule.md\` to avoid proposing duplicate or low-value rule ideas."
+              echo "Append one entry each time verify returns \`No-Go\`."
+              echo ""
+              echo "## Entry format"
+              echo "- \`rule-id\`: snake_case identifier"
+              echo "- \`rule idea\`: short summary used in ideation"
+              echo "- \`no-go reason\`: concise reason summary from verify"
+              echo "- \`run-url\`: GitHub Actions run URL for traceability"
+              echo ""
+              echo "## Entries"
+            } > "${NO_GO_HISTORY_PATH}"
           fi
 
-          git add -A
-          git commit -m "feat(rules): add ${RULE_ID} via codex workflow"
-          git remote set-url origin "https://x-access-token:${GH_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          entry_time="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          {
+            echo ""
+            echo "## ${entry_time} | ${RULE_ID}"
+            echo "- rule-id: \`${RULE_ID}\`"
+            echo "- rule idea: ${RULE_IDEA}"
+            echo "- no-go reason: ${NO_GO_REASON}"
+            echo "- run-url: ${run_url}"
+          } >> "${NO_GO_HISTORY_PATH}"
+
+          git add "${NO_GO_HISTORY_PATH}"
+          git commit -m "docs(prompts): record no-go rule ${RULE_ID}"
+
+          pushed="false"
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:${DEFAULT_BRANCH}"; then
+              pushed="true"
+              break
+            fi
+            if [[ "${attempt}" -lt 3 ]]; then
+              git fetch origin "${DEFAULT_BRANCH}"
+              git rebase "origin/${DEFAULT_BRANCH}"
+            fi
+          done
+
+          if [[ "${pushed}" != "true" ]]; then
+            echo "Failed to push No-Go history update after retries." >&2
+            exit 1
+          fi
+
+      - name: Close PR and delete branch on No-Go
+        if: needs.phase4_verify.outputs.recommendation == 'No-Go'
+        env:
+          PR_NUMBER: ${{ needs.pr_open.outputs.pr_number }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh pr close "${PR_NUMBER}" --delete-branch --comment "Closing automatically because verify recommendation is No-Go."
+
+      - name: Enable PR auto-merge on Go
+        if: needs.phase4_verify.outputs.recommendation == 'Go'
+        env:
+          PR_NUMBER: ${{ needs.pr_open.outputs.pr_number }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh pr merge "${PR_NUMBER}" --auto --squash --delete-branch
+
+      - name: Final workflow summary
+        if: always()
+        run: |
+          {
+            echo "## PR finalize"
+            echo ""
+            echo "- pr-number: \`${{ needs.pr_open.outputs.pr_number || 'unknown' }}\`"
+            echo "- recommendation: \`${{ needs.phase4_verify.outputs.recommendation || 'unknown' }}\`"
+            if [[ "${{ needs.phase4_verify.outputs.recommendation }}" == "Go" ]]; then
+              echo "- action: \`auto-merge enabled\`"
+            else
+              echo "- action: \`closed and branch deleted\`"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
