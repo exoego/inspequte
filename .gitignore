@@ -21,3 +21,9 @@ target/
 # Gradle
 gradle-plugin/.gradle/
 gradle-plugin/build/
+
+# Generated rule docs
+docs/rules/*.md
+
+# Local verification bundle for isolated rule review
+verify-input/

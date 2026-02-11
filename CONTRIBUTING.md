@@ -30,9 +30,12 @@ The spans include attributes like `inspequte.rule_id`, `inspequte.class`, and
 `inspequte.jar_path`/`inspequte.jar_entry` to help isolate slow rules. Use a
 collector UI such as Jaeger to inspect the trace details.
 
-### Rule authoring skill
-When adding or updating rules, mention `rule-authoring` in your request to trigger the repo-scoped skill in `.codex/skills/rule-authoring`.
-Example: `$rule-authoring add a rule to detect empty catch blocks`
+### Rule workflow skills
+When adding or updating rules, use the local workflow skills in `.codex/skills/`:
+- `inspequte-rule-plan`
+- `inspequte-rule-spec`
+- `inspequte-rule-impl`
+- `inspequte-rule-verify`
 
 ### Validate SARIF during CI (optional)
 ```yaml

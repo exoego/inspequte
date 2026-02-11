@@ -117,11 +117,14 @@ Performance cliffs make the tool unusable in large codebases.
 
 ## Principle
 Verification must be based on explicit file inputs only.
+Verification MUST only use spec + diff + reports.
 
 Verify must use:
 - `spec.md`
 - `git diff` (or patch)
 - Standardized test/e2e reports
+
+No other inputs are allowed for verify decisions.
 
 Verify must NOT use:
 - `plan.md`

@@ -27,6 +27,32 @@ The name combines "inspect" and "cute". The CLI command is `inspequte`.
 - No IDE integration required.
 - Deterministic SARIF v2.1.0 output for LLM-friendly automation.
 
+## Local rule workflow (Codex skills)
+Four local skills are available under `.codex/skills/` for sequential rule work:
+- `inspequte-rule-plan`
+- `inspequte-rule-spec`
+- `inspequte-rule-impl`
+- `inspequte-rule-verify`
+
+Recommended sequence:
+1. Plan: run `inspequte-rule-plan` with a short rule idea and target `rule-id`.
+2. Spec: run `inspequte-rule-spec` to write `src/rules/<rule-id>/spec.md`.
+3. Implement: run `inspequte-rule-impl` from `spec.md` and add tests.
+4. Prepare isolated verify input:
+   ```bash
+   scripts/prepare-verify-input.sh <rule-id> [base-ref]
+   cargo build > verify-input/reports/cargo-build.txt 2>&1
+   cargo test > verify-input/reports/cargo-test.txt 2>&1
+   cargo audit --format sarif > verify-input/reports/cargo-audit.sarif
+   ```
+5. Verify: run `inspequte-rule-verify` using `verify-input/` only (no plan/log context).
+
+Rule docs generation is deterministic:
+```bash
+scripts/generate-rule-docs.sh
+```
+This command regenerates `docs/rules/index.md` and `docs/rules/<rule-id>.md`.
+
 ## Bytecode/JDK compatibility
 - Supports JVM class files up to Java 21 (major version 65).
 - Some advanced bytecode attributes may still be skipped in future releases.
