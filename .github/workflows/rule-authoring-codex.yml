@@ -14,20 +14,23 @@ on:
         default: true
         type: boolean
 
+env:
+  BASE_REF: ${{ inputs.base_ref }}
+
+# Design intent for 4 Codex phases:
+# - phase1 (ideate+plan): establish one deterministic target and plan artifact.
+# - phase2 (spec): lock the contract before implementation.
+# - phase3 (impl): implement against fixed spec with test feedback.
+# - phase4 (verify): evaluate only verify-input evidence and gate commit/push.
+# Splitting phases reduces prompt/context mixing and makes each artifact auditable.
 jobs:
-  author-rule:
-    # Design intent for 4 Codex phases:
-    # - phase1 (ideate+plan): establish one deterministic target and plan artifact.
-    # - phase2 (spec): lock the contract before implementation.
-    # - phase3 (impl): implement against fixed spec with test feedback.
-    # - phase4 (verify): evaluate only verify-input evidence and gate commit/push.
-    # Splitting phases reduces prompt/context mixing and makes each artifact auditable.
+  phase1_ideate_plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
     permissions:
-      contents: write
-    env:
-      BASE_REF: ${{ inputs.base_ref }}
+      contents: read
+    outputs:
+      rule_id: ${{ steps.rule_meta.outputs.rule_id }}
+      rule_idea: ${{ steps.rule_meta.outputs.rule_idea }}
     steps:
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -35,17 +38,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/setup-java@v5
-        with:
-          distribution: "temurin"
-          java-version-file: ".java-version"
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
-
-      - name: Prepare prompt/output workspace
+      - name: Prepare workspace
         run: |
           mkdir -p target/codex-workflow/prompts
           mkdir -p target/codex-workflow/output
@@ -53,7 +46,7 @@ jobs:
 
       - name: Write phase-1 prompt (ideate + plan)
         run: |
-          cat > target/codex-workflow/prompts/phase1-ideate-plan.md <<'EOF'
+          cat > target/codex-workflow/prompts/phase1-ideate-plan.md <<'PROMPT'
           You are Codex in this repository.
 
           Use both base prompts below:
@@ -70,13 +63,14 @@ jobs:
           rule-id: <snake_case_id>
           rule idea: <one short sentence>
           plan-path: src/rules/<snake_case_id>/plan.md
-          EOF
+          PROMPT
 
       - name: Phase 1 - Ideate + Plan
         id: codex_phase1
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          safety-strategy: drop-sudo
           prompt-file: target/codex-workflow/prompts/phase1-ideate-plan.md
           output-file: target/codex-workflow/output/phase1-final-message.txt
           sandbox: workspace-write
@@ -121,22 +115,73 @@ jobs:
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
 
+          cat > target/codex-workflow/output/rule-meta.txt <<EOF
+          rule-id: ${rule_id}
+          rule idea: ${rule_idea}
+          EOF
+
+      - name: Capture cumulative patch (phase1)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          git diff --cached --binary > target/codex-workflow/output/phase1-cumulative.patch
+
       - name: Upload phase-1 artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: always()
         with:
-          name: codex-phase1-${{ steps.rule_meta.outputs.rule_id || 'unknown' }}
+          name: codex-phase1
           path: |
             target/codex-workflow/prompts/phase1-ideate-plan.md
             target/codex-workflow/output/phase1-final-message.txt
+            target/codex-workflow/output/rule-meta.txt
+            target/codex-workflow/output/phase1-cumulative.patch
             src/rules/${{ steps.rule_meta.outputs.rule_id }}/plan.md
           if-no-files-found: warn
 
+  phase2_spec:
+    runs-on: ubuntu-latest
+    needs: phase1_ideate_plan
+    permissions:
+      contents: read
+    outputs:
+      rule_id: ${{ needs.phase1_ideate_plan.outputs.rule_id }}
+      rule_idea: ${{ needs.phase1_ideate_plan.outputs.rule_idea }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download phase-1 artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: codex-phase1
+          path: target/codex-workflow/from-phase1
+
+      - name: Apply cumulative patch from phase1
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch_file="target/codex-workflow/from-phase1/target/codex-workflow/output/phase1-cumulative.patch"
+          if [[ ! -f "${patch_file}" ]]; then
+            echo "Missing patch: ${patch_file}" >&2
+            exit 1
+          fi
+          if [[ -s "${patch_file}" ]]; then
+            git apply --whitespace=nowarn "${patch_file}"
+          else
+            echo "phase1 patch is empty; skipping apply."
+          fi
+
       - name: Write phase-2 prompt (plan -> spec)
         env:
-          RULE_ID: ${{ steps.rule_meta.outputs.rule_id }}
-          RULE_IDEA: ${{ steps.rule_meta.outputs.rule_idea }}
+          RULE_ID: ${{ needs.phase1_ideate_plan.outputs.rule_id }}
+          RULE_IDEA: ${{ needs.phase1_ideate_plan.outputs.rule_idea }}
         run: |
+          mkdir -p target/codex-workflow/prompts target/codex-workflow/output
           cat > target/codex-workflow/prompts/phase2-spec.md <<EOF
           You are Codex in this repository.
 
@@ -162,6 +207,7 @@ jobs:
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          safety-strategy: drop-sudo
           prompt-file: target/codex-workflow/prompts/phase2-spec.md
           output-file: target/codex-workflow/output/phase2-final-message.txt
           sandbox: workspace-write
@@ -169,24 +215,78 @@ jobs:
 
       - name: Ensure spec exists
         run: |
-          test -f "src/rules/${{ steps.rule_meta.outputs.rule_id }}/spec.md"
+          test -f "src/rules/${{ needs.phase1_ideate_plan.outputs.rule_id }}/spec.md"
+
+      - name: Capture cumulative patch (phase2)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          git diff --cached --binary > target/codex-workflow/output/phase2-cumulative.patch
 
       - name: Upload phase-2 artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: always()
         with:
-          name: codex-phase2-${{ steps.rule_meta.outputs.rule_id }}
+          name: codex-phase2
           path: |
             target/codex-workflow/prompts/phase2-spec.md
             target/codex-workflow/output/phase2-final-message.txt
-            src/rules/${{ steps.rule_meta.outputs.rule_id }}/plan.md
-            src/rules/${{ steps.rule_meta.outputs.rule_id }}/spec.md
+            target/codex-workflow/output/phase2-cumulative.patch
+            src/rules/${{ needs.phase1_ideate_plan.outputs.rule_id }}/plan.md
+            src/rules/${{ needs.phase1_ideate_plan.outputs.rule_id }}/spec.md
           if-no-files-found: warn
+
+  phase3_impl:
+    runs-on: ubuntu-latest
+    needs: phase2_spec
+    permissions:
+      contents: read
+    outputs:
+      rule_id: ${{ needs.phase2_spec.outputs.rule_id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: "temurin"
+          java-version-file: ".java-version"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+
+      - name: Download phase-2 artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: codex-phase2
+          path: target/codex-workflow/from-phase2
+
+      - name: Apply cumulative patch from phase2
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch_file="target/codex-workflow/from-phase2/target/codex-workflow/output/phase2-cumulative.patch"
+          if [[ ! -f "${patch_file}" ]]; then
+            echo "Missing patch: ${patch_file}" >&2
+            exit 1
+          fi
+          if [[ -s "${patch_file}" ]]; then
+            git apply --whitespace=nowarn "${patch_file}"
+          else
+            echo "phase2 patch is empty; skipping apply."
+          fi
 
       - name: Write phase-3 prompt (spec -> impl)
         env:
-          RULE_ID: ${{ steps.rule_meta.outputs.rule_id }}
+          RULE_ID: ${{ needs.phase2_spec.outputs.rule_id }}
         run: |
+          mkdir -p target/codex-workflow/prompts target/codex-workflow/output
           cat > target/codex-workflow/prompts/phase3-impl.md <<EOF
           You are Codex in this repository.
 
@@ -212,6 +312,7 @@ jobs:
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          safety-strategy: drop-sudo
           prompt-file: target/codex-workflow/prompts/phase3-impl.md
           output-file: target/codex-workflow/output/phase3-final-message.txt
           sandbox: workspace-write
@@ -229,10 +330,11 @@ jobs:
 
       - name: Prepare verify-input and reports
         env:
-          RULE_ID: ${{ steps.rule_meta.outputs.rule_id }}
+          RULE_ID: ${{ needs.phase2_spec.outputs.rule_id }}
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p verify-input/reports
           if [[ -n "${BASE_REF}" ]]; then
             scripts/prepare-verify-input.sh "${RULE_ID}" "${BASE_REF}"
           else
@@ -253,9 +355,9 @@ jobs:
           cargo audit --format sarif > verify-input/reports/cargo-audit.sarif
           audit_exit=$?
           if [[ ${audit_exit} -ne 0 ]]; then
-            cat > verify-input/reports/cargo-audit.sarif <<'EOF'
+            cat > verify-input/reports/cargo-audit.sarif <<'SARIF'
           {"$schema":"https://json.schemastore.org/sarif-2.1.0.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"cargo-audit"}},"results":[{"level":"error","message":{"text":"cargo audit failed in workflow"}}]}]}
-          EOF
+          SARIF
           fi
           set -e
 
@@ -265,26 +367,84 @@ jobs:
           cargo audit exit code: ${audit_exit}
           EOF
 
+      - name: Capture cumulative patch (phase3)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          git diff --cached --binary > target/codex-workflow/output/phase3-cumulative.patch
+
       - name: Upload phase-3 artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: always()
         with:
-          name: codex-phase3-${{ steps.rule_meta.outputs.rule_id }}
+          name: codex-phase3
           path: |
             target/codex-workflow/prompts/phase3-impl.md
             target/codex-workflow/output/phase3-final-message.txt
             target/codex-workflow/output/phase3-cargo-test.txt
             target/codex-workflow/output/phase3-cargo-test.exitcode
-            src/rules/${{ steps.rule_meta.outputs.rule_id }}/
+            target/codex-workflow/output/phase3-cumulative.patch
+            src/rules/${{ needs.phase2_spec.outputs.rule_id }}/
             src/rules/mod.rs
             tests/snapshots/callgraph.sarif
             verify-input/
           if-no-files-found: warn
 
+  phase4_verify:
+    runs-on: ubuntu-latest
+    needs: phase3_impl
+    permissions:
+      contents: read
+    outputs:
+      rule_id: ${{ needs.phase3_impl.outputs.rule_id }}
+      recommendation: ${{ steps.verify_gate.outputs.recommendation }}
+      adopt: ${{ steps.verify_gate.outputs.adopt }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download phase-3 artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: codex-phase3
+          path: target/codex-workflow/from-phase3
+
+      - name: Apply cumulative patch from phase3
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch_file="target/codex-workflow/from-phase3/target/codex-workflow/output/phase3-cumulative.patch"
+          if [[ ! -f "${patch_file}" ]]; then
+            echo "Missing patch: ${patch_file}" >&2
+            exit 1
+          fi
+          if [[ -s "${patch_file}" ]]; then
+            git apply --whitespace=nowarn "${patch_file}"
+          else
+            echo "phase3 patch is empty; skipping apply."
+          fi
+
+      - name: Restore verify-input from phase3 artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf verify-input
+          if [[ -d target/codex-workflow/from-phase3/verify-input ]]; then
+            cp -R target/codex-workflow/from-phase3/verify-input ./verify-input
+          else
+            echo "verify-input not found in phase3 artifact; creating empty directory."
+            mkdir -p verify-input/reports
+          fi
+
       - name: Write phase-4 prompt (verify only)
         env:
-          RULE_ID: ${{ steps.rule_meta.outputs.rule_id }}
+          RULE_ID: ${{ needs.phase3_impl.outputs.rule_id }}
         run: |
+          mkdir -p target/codex-workflow/prompts target/codex-workflow/output
           cat > target/codex-workflow/prompts/phase4-verify.md <<EOF
           You are Codex in this repository.
 
@@ -309,6 +469,7 @@ jobs:
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          safety-strategy: drop-sudo
           prompt-file: target/codex-workflow/prompts/phase4-verify.md
           output-file: target/codex-workflow/output/phase4-final-message.txt
           sandbox: workspace-write
@@ -338,29 +499,79 @@ jobs:
             echo "adopt=${adopt}"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Capture cumulative patch (phase4)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          git diff --cached --binary > target/codex-workflow/output/phase4-cumulative.patch
+
       - name: Upload phase-4 artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: always()
         with:
-          name: codex-phase4-${{ steps.rule_meta.outputs.rule_id }}-${{ steps.verify_gate.outputs.recommendation || 'unknown' }}
+          name: codex-phase4
           path: |
             target/codex-workflow/prompts/phase4-verify.md
             target/codex-workflow/output/phase4-final-message.txt
+            target/codex-workflow/output/phase4-cumulative.patch
             verify-input/
           if-no-files-found: warn
 
-      - name: Create app token (Go only)
-        if: steps.verify_gate.outputs.adopt == 'true' && inputs.push_if_go == true
+      - name: Workflow summary
+        if: always()
+        run: |
+          {
+            echo "## Codex rule authoring workflow"
+            echo ""
+            echo "- rule-id: \`${{ needs.phase3_impl.outputs.rule_id || 'unknown' }}\`"
+            echo "- recommendation: \`${{ steps.verify_gate.outputs.recommendation || 'unknown' }}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  commit_push:
+    runs-on: ubuntu-latest
+    needs: phase4_verify
+    if: needs.phase4_verify.outputs.adopt == 'true' && inputs.push_if_go == true
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download phase-4 artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: codex-phase4
+          path: target/codex-workflow/from-phase4
+
+      - name: Apply cumulative patch from phase4
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch_file="target/codex-workflow/from-phase4/target/codex-workflow/output/phase4-cumulative.patch"
+          if [[ ! -f "${patch_file}" ]]; then
+            echo "Missing patch: ${patch_file}" >&2
+            exit 1
+          fi
+          if [[ -s "${patch_file}" ]]; then
+            git apply --whitespace=nowarn "${patch_file}"
+          else
+            echo "phase4 patch is empty; skipping apply."
+          fi
+
+      - name: Create app token
         id: app-token
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ vars.APP_ID }}
           private-key: ${{ secrets.PRIVATE_KEY }}
 
-      - name: Commit and push (Go only)
-        if: steps.verify_gate.outputs.adopt == 'true' && inputs.push_if_go == true
+      - name: Commit and push
         env:
-          RULE_ID: ${{ steps.rule_meta.outputs.rule_id }}
+          RULE_ID: ${{ needs.phase4_verify.outputs.rule_id }}
           GH_APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
@@ -376,14 +587,3 @@ jobs:
           git commit -m "feat(rules): add ${RULE_ID} via codex workflow"
           git remote set-url origin "https://x-access-token:${GH_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push origin "HEAD:${GITHUB_REF_NAME}"
-
-      - name: Workflow summary
-        if: always()
-        run: |
-          {
-            echo "## Codex rule authoring workflow"
-            echo ""
-            echo "- rule-id: \`${{ steps.rule_meta.outputs.rule_id || 'unknown' }}\`"
-            echo "- recommendation: \`${{ steps.verify_gate.outputs.recommendation || 'unknown' }}\`"
-            echo "- pushed: \`${{ steps.verify_gate.outputs.adopt == 'true' && inputs.push_if_go == true }}\`"
-          } >> "${GITHUB_STEP_SUMMARY}"
