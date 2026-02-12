@@ -49,6 +49,13 @@
               }
             },
             {
+              "id": "EXCEPTION_CAUSE_NOT_PRESERVED",
+              "name": "Exception cause not preserved",
+              "shortDescription": {
+                "text": "Catch handlers that throw new exceptions without preserving the cause"
+              }
+            },
+            {
               "id": "INEFFECTIVE_EQUALS_HASHCODE",
               "name": "Ineffective equals/hashCode",
               "shortDescription": {

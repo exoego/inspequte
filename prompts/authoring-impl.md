@@ -18,8 +18,9 @@ Use the following skill to implement one rule:
 1. Use `inspequte-rule-impl`.
 2. Implement the rule and tests (TP/TN/Edge) against `spec.md`.
 3. Run `cargo fmt`.
-4. If rule registration changes, update snapshots as needed.
-5. Do not run verify in this phase.
+4. Run the skill completeness gate (`git diff --name-only`) and ensure implementation + tests are included in the diff.
+5. If rule registration changes, update snapshots as needed.
+6. Do not run verify in this phase.
 
 ## Final response format
 Output briefly:

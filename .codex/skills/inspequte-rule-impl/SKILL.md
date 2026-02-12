@@ -22,24 +22,35 @@ description: Implement an inspequte rule from spec.md, including tests and minim
 
 ## Workflow
 1. Map each acceptance criterion in `spec.md` to code and test tasks.
-2. Implement or update rule metadata with unique `id`, clear `name`, and short `description`.
-3. Ensure user-facing findings are intuitive and actionable: explain what is wrong and what to change.
-4. Keep rule wiring correct:
+2. Create an acceptance checklist in your notes and keep it updated while implementing:
+   - criterion text
+   - implementation location
+   - test that proves it
+3. Implement or update rule metadata with unique `id`, clear `name`, and short `description`.
+4. Ensure user-facing findings are intuitive and actionable: explain what is wrong and what to change.
+5. Keep rule wiring correct:
    - Add `#[derive(Default)]` to the rule struct.
    - Add `crate::register_rule!(RuleName);` after the rule struct declaration.
    - Implement `Rule::run` with `AnalysisContext` and relevant helpers from `crate::rules` (for example: `result_message`, `method_location_with_line`, `class_location`).
    - Guard class scans with `if !context.is_analysis_target_class(class) { continue; }` to skip classpath-only classes.
-5. Add harness tests in the same rule module (`#[cfg(test)]`) using `JvmTestHarness`:
+6. Add harness tests in the same rule module (`#[cfg(test)]`) using `JvmTestHarness`:
    - Use `JAVA_HOME` pointing to Java 21.
    - Prefer local stub sources; avoid downloading jars.
    - Assert findings by filtering SARIF results with `rule_id`.
    - Cover report and non-report paths (TP/TN/edge, including FP/FN control).
    - Use generic Java names (`ClassA`, `ClassB`, `MethodX`, `varOne`) unless validating real JDK/library APIs.
-6. If adding a brand-new rule module, declare it in `src/rules/mod.rs`.
-7. If the registered rule set changes, update snapshot expectations (`INSPEQUTE_UPDATE_SNAPSHOTS=1 cargo test sarif_callgraph_snapshot`).
-8. Keep output deterministic (stable ordering and IDs; no hash-order dependence).
-9. Run `cargo fmt`, then `cargo build`, `cargo test`, and `cargo audit --format sarif`.
-10. Update docs only when externally visible behavior changed.
+7. If adding a brand-new rule module, declare it in `src/rules/mod.rs`.
+8. If the registered rule set changes, update snapshot expectations (`INSPEQUTE_UPDATE_SNAPSHOTS=1 cargo test sarif_callgraph_snapshot`).
+9. Keep output deterministic (stable ordering and IDs; no hash-order dependence).
+10. Run `cargo fmt`, then `cargo build`, `cargo test`, and `cargo audit --format sarif`.
+11. Run a completeness gate before finalizing:
+   - `git diff --name-only` must include rule implementation (`src/rules/<rule-id>/mod.rs`) and tests.
+   - If a new rule is added, diff must include rule registration updates in `src/rules/mod.rs`.
+   - If diff only contains registration/docs/prompt changes, treat the implementation as incomplete and continue.
+12. Optional verify handoff safety check (recommended when preparing CI verify):
+   - Run `scripts/prepare-verify-input.sh <rule-id> [base-ref]`.
+   - Confirm `verify-input/changed-files.txt` includes the rule implementation file and tests; otherwise stop and regenerate inputs.
+13. Update docs only when externally visible behavior changed.
 
 ## Template Snippets
 Rule skeleton:
@@ -106,8 +117,10 @@ assert!(messages.iter().any(|msg| msg.contains("expected")));
 
 ## Definition of Done
 - Code and tests implement all acceptance criteria from `spec.md`.
+- Acceptance checklist items are all mapped to concrete tests.
 - `cargo fmt` has been run.
 - `cargo build`, `cargo test`, and `cargo audit --format sarif` pass, or failures are reported with concrete evidence.
+- Final diff includes real rule implementation and tests (not only rule registration/doc updates).
 - `spec.md` is unchanged unless explicitly requested.
 
 Use this Definition of Done as the compact implementation checklist for rule work.
