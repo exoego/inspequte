@@ -1,11 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::BTreeSet;
 
 use anyhow::Result;
 use opentelemetry::KeyValue;
 use serde_sarif::sarif::Result as SarifResult;
 
+use crate::dataflow::worklist::{
+    BlockEndStep, InstructionStep, WorklistSemantics, WorklistState, analyze_method,
+};
 use crate::engine::AnalysisContext;
-use crate::ir::{BasicBlock, Instruction, InstructionKind, Method};
+use crate::ir::{Instruction, InstructionKind, Method};
 use crate::rules::{Rule, RuleMetadata, method_location_with_line, result_message};
 
 /// Rule that detects lock acquisitions without guaranteed unlock on all reachable exits.
@@ -28,6 +31,66 @@ struct ExplorationState {
     block_start: u32,
     instruction_index: usize,
     unlock_seen: bool,
+}
+
+impl WorklistState for ExplorationState {
+    fn block_start(&self) -> u32 {
+        self.block_start
+    }
+
+    fn instruction_index(&self) -> usize {
+        self.instruction_index
+    }
+
+    fn set_position(&mut self, block_start: u32, instruction_index: usize) {
+        self.block_start = block_start;
+        self.instruction_index = instruction_index;
+    }
+}
+
+/// Dataflow callbacks for lock release path exploration.
+struct LockPathSemantics {
+    site: LockSite,
+}
+
+impl WorklistSemantics for LockPathSemantics {
+    type State = ExplorationState;
+    type Finding = ();
+
+    fn initial_states(&self, _method: &Method) -> Vec<Self::State> {
+        vec![ExplorationState {
+            block_start: self.site.block_start,
+            instruction_index: self.site.instruction_index + 1,
+            unlock_seen: false,
+        }]
+    }
+
+    fn transfer_instruction(
+        &self,
+        _method: &Method,
+        instruction: &Instruction,
+        state: &mut Self::State,
+    ) -> Result<InstructionStep<Self::Finding>> {
+        if is_unlock_invocation(instruction) {
+            state.unlock_seen = true;
+        }
+        Ok(InstructionStep::continue_path())
+    }
+
+    fn on_block_end(
+        &self,
+        _method: &Method,
+        state: &Self::State,
+        successors: &[u32],
+    ) -> Result<BlockEndStep<Self::State, Self::Finding>> {
+        if successors.is_empty() {
+            if state.unlock_seen {
+                return Ok(BlockEndStep::terminal());
+            }
+            return Ok(BlockEndStep::terminal().with_finding(()));
+        }
+        Ok(BlockEndStep::follow_all_successors(state, successors))
+    }
 }
 
 impl Rule for LockNotReleasedOnExceptionPathRule {
@@ -64,15 +127,13 @@ impl Rule for LockNotReleasedOnExceptionPathRule {
                             continue;
                         }
 
-                        let block_map = block_map(method);
-                        let successor_map = successor_map(method);
                         let mut seen_offsets = BTreeSet::new();
 
                         for site in lock_sites {
                             if !seen_offsets.insert(site.offset) {
                                 continue;
                             }
-                            if has_exit_path_without_unlock(&block_map, &successor_map, site) {
+                            if has_exit_path_without_unlock(method, site)? {
                                 let message = result_message(format!(
                                     "Lock acquired in {}.{}{} may exit without unlock(); release it in a finally block.",
                                     class.name, method.name, method.descriptor
@@ -120,80 +181,10 @@ fn lock_sites(method: &Method) -> Vec<LockSite> {
     sites
 }
 
-fn block_map(method: &Method) -> BTreeMap<u32, &BasicBlock> {
-    let mut map = BTreeMap::new();
-    for block in &method.cfg.blocks {
-        map.insert(block.start_offset, block);
-    }
-    map
-}
-
-fn successor_map(method: &Method) -> BTreeMap<u32, Vec<u32>> {
-    let mut map: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
-    for edge in &method.cfg.edges {
-        map.entry(edge.from).or_default().push(edge.to);
-    }
-    for targets in map.values_mut() {
-        targets.sort();
-        targets.dedup();
-    }
-    map
-}
-
-fn has_exit_path_without_unlock(
-    block_map: &BTreeMap<u32, &BasicBlock>,
-    successor_map: &BTreeMap<u32, Vec<u32>>,
-    site: LockSite,
-) -> bool {
-    let mut queue = VecDeque::new();
-    let mut visited = BTreeSet::new();
-
-    queue.push_back(ExplorationState {
-        block_start: site.block_start,
-        instruction_index: site.instruction_index + 1,
-        unlock_seen: false,
-    });
-
-    while let Some(state) = queue.pop_front() {
-        if !visited.insert(state) {
-            continue;
-        }
-
-        let Some(block) = block_map.get(&state.block_start) else {
-            continue;
-        };
-
-        let mut unlock_seen = state.unlock_seen;
-        for instruction in block.instructions.iter().skip(state.instruction_index) {
-            if is_unlock_invocation(instruction) {
-                unlock_seen = true;
-            }
-        }
-
-        let Some(successors) = successor_map.get(&state.block_start) else {
-            if !unlock_seen {
-                return true;
-            }
-            continue;
-        };
-
-        if successors.is_empty() {
-            if !unlock_seen {
-                return true;
-            }
-            continue;
-        }
-
-        for next in successors {
-            queue.push_back(ExplorationState {
-                block_start: *next,
-                instruction_index: 0,
-                unlock_seen,
-            });
-        }
-    }
-
-    false
+fn has_exit_path_without_unlock(method: &Method, site: LockSite) -> Result<bool> {
+    let semantics = LockPathSemantics { site };
+    let findings = analyze_method(method, &semantics)?;
+    Ok(!findings.is_empty())
 }
 
 fn is_lock_invocation(instruction: &Instruction) -> bool {

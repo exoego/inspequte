@@ -7,7 +7,7 @@ Create a reusable worklist-based analysis engine for bytecode rules so rules can
 Multiple rules perform similar control-flow iteration and state propagation. Duplicating this logic increases bug risk, makes convergence behavior inconsistent, and slows new rule development.
 
 ## Implementation Approach
-- Add a shared module (for example `src/analysis/engine.rs`) containing:
+- Add a shared module (implemented as `src/dataflow/worklist.rs`) containing:
   - Worklist loop
   - Per-block/per-instruction state scheduling
   - Visited-state tracking and deterministic ordering
@@ -47,3 +47,7 @@ Multiple rules perform similar control-flow iteration and state propagation. Dup
 ## Complexity Estimate
 High
 
+## Post-mortem
+- Went well: extracting a small `dataflow::worklist` API allowed both target rules to migrate without changing their rule messages or SARIF shape.
+- Tricky: preserving deterministic convergence required canonicalization hooks plus sorted successor fan-out in the shared loop.
+- Follow-up: evaluate migration of higher-complexity fixed-point rules (for example `NULLNESS`) after extending branch/join hooks.

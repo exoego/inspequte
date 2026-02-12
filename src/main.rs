@@ -1,6 +1,7 @@
 mod baseline;
 mod cfg;
 mod classpath;
+mod dataflow;
 mod descriptor;
 mod engine;
 mod ir;

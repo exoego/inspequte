@@ -1,11 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::BTreeSet;
 
 use anyhow::Result;
 use opentelemetry::KeyValue;
 use serde_sarif::sarif::Result as SarifResult;
 
+use crate::dataflow::worklist::{
+    InstructionStep, WorklistSemantics, WorklistState, analyze_method,
+};
 use crate::engine::AnalysisContext;
-use crate::ir::{BasicBlock, Method};
+use crate::ir::{Instruction, Method};
 use crate::opcodes;
 use crate::rules::{Rule, RuleMetadata, method_location_with_line, result_message};
 
@@ -14,6 +17,57 @@ use crate::rules::{Rule, RuleMetadata, method_location_with_line, result_message
 pub(crate) struct ReturnInFinallyRule;
 
 crate::register_rule!(ReturnInFinallyRule);
+
+/// Program-point state used for finally-handler return scanning.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+struct ReturnScanState {
+    block_start: u32,
+    instruction_index: usize,
+}
+
+impl WorklistState for ReturnScanState {
+    fn block_start(&self) -> u32 {
+        self.block_start
+    }
+
+    fn instruction_index(&self) -> usize {
+        self.instruction_index
+    }
+
+    fn set_position(&mut self, block_start: u32, instruction_index: usize) {
+        self.block_start = block_start;
+        self.instruction_index = instruction_index;
+    }
+}
+
+/// Dataflow callbacks that extract return instruction offsets from a handler region.
+struct ReturnScanSemantics {
+    handler_pc: u32,
+}
+
+impl WorklistSemantics for ReturnScanSemantics {
+    type State = ReturnScanState;
+    type Finding = u32;
+
+    fn initial_states(&self, _method: &Method) -> Vec<Self::State> {
+        vec![ReturnScanState {
+            block_start: self.handler_pc,
+            instruction_index: 0,
+        }]
+    }
+
+    fn transfer_instruction(
+        &self,
+        _method: &Method,
+        instruction: &Instruction,
+        _state: &mut Self::State,
+    ) -> Result<InstructionStep<Self::Finding>> {
+        if is_return_opcode(instruction.opcode) {
+            return Ok(InstructionStep::continue_path().with_finding(instruction.offset));
+        }
+        Ok(InstructionStep::continue_path())
+    }
+}
 
 impl Rule for ReturnInFinallyRule {
     fn metadata(&self) -> RuleMetadata {
@@ -49,43 +103,31 @@ impl Rule for ReturnInFinallyRule {
                             continue;
                         }
 
-                        let block_map = block_map(method);
-                        let successor_map = successor_map(method);
                         let mut seen_offsets = BTreeSet::new();
 
                         for handler_pc in handler_offsets {
-                            let handler_blocks =
-                                handler_blocks(handler_pc, &block_map, &successor_map);
-                            for block_start in handler_blocks {
-                                let Some(block) = block_map.get(&block_start) else {
+                            for instruction_offset in return_offsets_in_handler(method, handler_pc)? {
+                                if !seen_offsets.insert(instruction_offset) {
                                     continue;
-                                };
-                                for instruction in &block.instructions {
-                                    if !is_return_opcode(instruction.opcode) {
-                                        continue;
-                                    }
-                                    if !seen_offsets.insert(instruction.offset) {
-                                        continue;
-                                    }
-                                    let message = result_message(
-                                        "Return in finally overrides exceptions or prior returns. Move the return outside the finally block or return after the try/finally.",
-                                    );
-                                    let line = method.line_for_offset(instruction.offset);
-                                    let artifact_uri = context.class_artifact_uri(class);
-                                    let location = method_location_with_line(
-                                        &class.name,
-                                        &method.name,
-                                        &method.descriptor,
-                                        artifact_uri.as_deref(),
-                                        line,
-                                    );
-                                    class_results.push(
-                                        SarifResult::builder()
-                                            .message(message)
-                                            .locations(vec![location])
-                                            .build(),
-                                    );
                                 }
+                                let message = result_message(
+                                    "Return in finally overrides exceptions or prior returns. Move the return outside the finally block or return after the try/finally.",
+                                );
+                                let line = method.line_for_offset(instruction_offset);
+                                let artifact_uri = context.class_artifact_uri(class);
+                                let location = method_location_with_line(
+                                    &class.name,
+                                    &method.name,
+                                    &method.descriptor,
+                                    artifact_uri.as_deref(),
+                                    line,
+                                );
+                                class_results.push(
+                                    SarifResult::builder()
+                                        .message(message)
+                                        .locations(vec![location])
+                                        .build(),
+                                );
                             }
                         }
                     }
@@ -110,54 +152,14 @@ fn finally_handler_offsets(method: &Method) -> Vec<u32> {
     offsets
 }
 
-fn block_map(method: &Method) -> BTreeMap<u32, &BasicBlock> {
-    let mut map = BTreeMap::new();
-    for block in &method.cfg.blocks {
-        map.insert(block.start_offset, block);
-    }
-    map
-}
-
-fn successor_map(method: &Method) -> BTreeMap<u32, Vec<u32>> {
-    let mut map: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
-    for edge in &method.cfg.edges {
-        map.entry(edge.from).or_default().push(edge.to);
-    }
-    for targets in map.values_mut() {
-        targets.sort();
-        targets.dedup();
-    }
-    map
-}
-
-fn handler_blocks(
-    handler_pc: u32,
-    block_map: &BTreeMap<u32, &BasicBlock>,
-    successor_map: &BTreeMap<u32, Vec<u32>>,
-) -> BTreeSet<u32> {
-    if !block_map.contains_key(&handler_pc) {
-        return BTreeSet::new();
-    }
-
-    let mut visited = BTreeSet::new();
-    let mut queue = VecDeque::new();
-    queue.push_back(handler_pc);
-
-    while let Some(block_start) = queue.pop_front() {
-        if !visited.insert(block_start) {
-            continue;
-        }
-        let Some(successors) = successor_map.get(&block_start) else {
-            continue;
-        };
-        for successor in successors {
-            if !visited.contains(successor) {
-                queue.push_back(*successor);
-            }
-        }
-    }
-
-    visited
+fn return_offsets_in_handler(method: &Method, handler_pc: u32) -> Result<Vec<u32>> {
+    let semantics = ReturnScanSemantics { handler_pc };
+    let findings = analyze_method(method, &semantics)?;
+    Ok(findings
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect())
 }
 
 fn is_return_opcode(opcode: u8) -> bool {

@@ -1,13 +1,17 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::cell::Cell;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
 use anyhow::Result;
 use opentelemetry::KeyValue;
 use serde_sarif::sarif::Result as SarifResult;
 
+use crate::dataflow::worklist::{
+    BlockEndStep, InstructionStep, WorklistSemantics, WorklistState, analyze_method,
+};
 use crate::descriptor::{ReturnKind, method_param_count, method_return_kind};
 use crate::engine::AnalysisContext;
-use crate::ir::{BasicBlock, CallKind, CallSite, Instruction, InstructionKind, Method};
+use crate::ir::{CallKind, CallSite, Instruction, InstructionKind, Method};
 use crate::opcodes;
 use crate::rules::{Rule, RuleMetadata, method_location_with_line, result_message};
 
@@ -102,6 +106,100 @@ struct ExecutionState {
     preserved_allocations: BTreeSet<u32>,
 }
 
+impl WorklistState for ExecutionState {
+    fn block_start(&self) -> u32 {
+        self.block_start
+    }
+
+    fn instruction_index(&self) -> usize {
+        self.instruction_index
+    }
+
+    fn set_position(&mut self, block_start: u32, instruction_index: usize) {
+        self.block_start = block_start;
+        self.instruction_index = instruction_index;
+    }
+}
+
+/// Dataflow callbacks for catch-handler symbolic execution.
+struct HandlerSemantics {
+    handler_pc: u32,
+    debug_enabled: bool,
+    stack_depth_dumped: Cell<bool>,
+}
+
+impl HandlerSemantics {
+    fn new(handler_pc: u32) -> Self {
+        Self {
+            handler_pc,
+            debug_enabled: debug_stack_dump_enabled(),
+            stack_depth_dumped: Cell::new(false),
+        }
+    }
+}
+
+impl WorklistSemantics for HandlerSemantics {
+    type State = ExecutionState;
+    type Finding = u32;
+
+    fn initial_states(&self, _method: &Method) -> Vec<Self::State> {
+        vec![ExecutionState {
+            block_start: self.handler_pc,
+            instruction_index: 0,
+            stack: vec![Value::Caught],
+            locals: BTreeMap::new(),
+            preserved_allocations: BTreeSet::new(),
+        }]
+    }
+
+    fn canonicalize_state(&self, state: &mut Self::State) {
+        canonicalize_state(state);
+    }
+
+    fn transfer_instruction(
+        &self,
+        method: &Method,
+        instruction: &Instruction,
+        state: &mut Self::State,
+    ) -> Result<InstructionStep<Self::Finding>> {
+        if is_return_opcode(instruction.opcode) {
+            apply_stack_effect(method, instruction, state)?;
+            return Ok(InstructionStep::terminate_path());
+        }
+
+        if instruction.opcode == opcodes::ATHROW {
+            let thrown = pop_or_unknown(&mut state.stack);
+            if let Value::New(allocation_offset) = thrown
+                && !state.preserved_allocations.contains(&allocation_offset)
+            {
+                return Ok(InstructionStep::terminate_path().with_finding(instruction.offset));
+            }
+            return Ok(InstructionStep::terminate_path());
+        }
+
+        apply_stack_effect(method, instruction, state)?;
+        prune_preserved_allocations(state);
+        if self.debug_enabled
+            && !self.stack_depth_dumped.get()
+            && state.stack.len() >= MAX_TRACKED_STACK_DEPTH
+        {
+            dump_stack_depth(method, self.handler_pc, instruction, state);
+            self.stack_depth_dumped.set(true);
+        }
+
+        Ok(InstructionStep::continue_path())
+    }
+
+    fn on_block_end(
+        &self,
+        _method: &Method,
+        state: &Self::State,
+        successors: &[u32],
+    ) -> Result<BlockEndStep<Self::State, Self::Finding>> {
+        Ok(BlockEndStep::follow_all_successors(state, successors))
+    }
+}
+
 fn handler_offsets(method: &Method) -> Vec<u32> {
     let mut offsets = BTreeSet::new();
     for handler in &method.exception_handlers {
@@ -111,81 +209,13 @@ fn handler_offsets(method: &Method) -> Vec<u32> {
 }
 
 fn analyze_handler(method: &Method, handler_pc: u32) -> Result<Vec<u32>> {
-    let debug_enabled = debug_stack_dump_enabled();
-    let block_map = block_map(method);
-    if !block_map.contains_key(&handler_pc) {
-        return Ok(Vec::new());
-    }
-
-    let successor_map = successor_map(method);
-    let mut queue = VecDeque::new();
-    let mut visited = BTreeSet::new();
-    let mut findings = BTreeSet::new();
-    let mut stack_depth_dumped = false;
-
-    queue.push_back(ExecutionState {
-        block_start: handler_pc,
-        instruction_index: 0,
-        stack: vec![Value::Caught],
-        locals: BTreeMap::new(),
-        preserved_allocations: BTreeSet::new(),
-    });
-
-    while let Some(state) = queue.pop_front() {
-        let mut state = state;
-        canonicalize_state(&mut state);
-        if !visited.insert(state.clone()) {
-            continue;
-        }
-
-        let Some(block) = block_map.get(&state.block_start) else {
-            continue;
-        };
-
-        if state.instruction_index >= block.instructions.len() {
-            enqueue_successors(&mut queue, &successor_map, state);
-            continue;
-        }
-
-        let instruction = &block.instructions[state.instruction_index];
-        let mut next_state = state.clone();
-        next_state.instruction_index += 1;
-
-        if is_return_opcode(instruction.opcode) {
-            apply_stack_effect(method, instruction, &mut next_state)?;
-            continue;
-        }
-
-        if instruction.opcode == opcodes::ATHROW {
-            let thrown = pop_or_unknown(&mut next_state.stack);
-            if let Value::New(allocation_offset) = thrown {
-                if !next_state
-                    .preserved_allocations
-                    .contains(&allocation_offset)
-                {
-                    findings.insert(instruction.offset);
-                }
-            }
-            continue;
-        }
-
-        apply_stack_effect(method, instruction, &mut next_state)?;
-        prune_preserved_allocations(&mut next_state);
-        canonicalize_state(&mut next_state);
-        if debug_enabled && !stack_depth_dumped && next_state.stack.len() >= MAX_TRACKED_STACK_DEPTH
-        {
-            dump_stack_depth(method, handler_pc, instruction, &next_state);
-            stack_depth_dumped = true;
-        }
-
-        if next_state.instruction_index < block.instructions.len() {
-            queue.push_back(next_state);
-        } else {
-            enqueue_successors(&mut queue, &successor_map, next_state);
-        }
-    }
-
-    Ok(findings.into_iter().collect())
+    let semantics = HandlerSemantics::new(handler_pc);
+    let findings = analyze_method(method, &semantics)?;
+    Ok(findings
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect())
 }
 
 fn apply_stack_effect(
@@ -500,41 +530,6 @@ fn dump_stack_depth(
         state.stack.len(),
         state.stack.iter().rev().take(8).collect::<Vec<_>>()
     );
-}
-
-fn enqueue_successors(
-    queue: &mut VecDeque<ExecutionState>,
-    successor_map: &BTreeMap<u32, Vec<u32>>,
-    state: ExecutionState,
-) {
-    if let Some(successors) = successor_map.get(&state.block_start) {
-        for successor in successors {
-            let mut successor_state = state.clone();
-            successor_state.block_start = *successor;
-            successor_state.instruction_index = 0;
-            queue.push_back(successor_state);
-        }
-    }
-}
-
-fn block_map(method: &Method) -> BTreeMap<u32, &BasicBlock> {
-    let mut map = BTreeMap::new();
-    for block in &method.cfg.blocks {
-        map.insert(block.start_offset, block);
-    }
-    map
-}
-
-fn successor_map(method: &Method) -> BTreeMap<u32, Vec<u32>> {
-    let mut map: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
-    for edge in &method.cfg.edges {
-        map.entry(edge.from).or_default().push(edge.to);
-    }
-    for targets in map.values_mut() {
-        targets.sort();
-        targets.dedup();
-    }
-    map
 }
 
 fn local_index_for(method: &Method, instruction: &Instruction) -> Option<usize> {

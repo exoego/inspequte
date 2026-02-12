@@ -1,11 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::Result;
 use opentelemetry::KeyValue;
 use serde_sarif::sarif::Result as SarifResult;
 
+use crate::dataflow::worklist::{
+    InstructionStep, WorklistSemantics, WorklistState, analyze_method,
+};
 use crate::engine::AnalysisContext;
-use crate::ir::{BasicBlock, Instruction, InstructionKind, Method};
+use crate::ir::{Instruction, InstructionKind, Method};
 use crate::opcodes;
 use crate::rules::{Rule, RuleMetadata, method_location_with_line, result_message};
 
@@ -14,6 +17,54 @@ use crate::rules::{Rule, RuleMetadata, method_location_with_line, result_message
 pub(crate) struct InterruptedExceptionRule;
 
 crate::register_rule!(InterruptedExceptionRule);
+
+/// Program-point state used to enumerate instructions reachable from a handler.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+struct ReachableInstructionState {
+    block_start: u32,
+    instruction_index: usize,
+}
+
+impl WorklistState for ReachableInstructionState {
+    fn block_start(&self) -> u32 {
+        self.block_start
+    }
+
+    fn instruction_index(&self) -> usize {
+        self.instruction_index
+    }
+
+    fn set_position(&mut self, block_start: u32, instruction_index: usize) {
+        self.block_start = block_start;
+        self.instruction_index = instruction_index;
+    }
+}
+
+/// Dataflow callbacks for collecting instruction offsets reachable from a handler entry.
+struct ReachableInstructionSemantics {
+    handler_pc: u32,
+}
+
+impl WorklistSemantics for ReachableInstructionSemantics {
+    type State = ReachableInstructionState;
+    type Finding = u32;
+
+    fn initial_states(&self, _method: &Method) -> Vec<Self::State> {
+        vec![ReachableInstructionState {
+            block_start: self.handler_pc,
+            instruction_index: 0,
+        }]
+    }
+
+    fn transfer_instruction(
+        &self,
+        _method: &Method,
+        instruction: &Instruction,
+        _state: &mut Self::State,
+    ) -> Result<InstructionStep<Self::Finding>> {
+        Ok(InstructionStep::continue_path().with_finding(instruction.offset))
+    }
+}
 
 impl Rule for InterruptedExceptionRule {
     fn metadata(&self) -> RuleMetadata {
@@ -49,7 +100,8 @@ impl Rule for InterruptedExceptionRule {
                             if !handled_handlers.insert(handler.handler_pc) {
                                 continue;
                             }
-                            let instructions = collect_reachable_instructions(method, handler.handler_pc);
+                            let instructions =
+                                collect_reachable_instructions(method, handler.handler_pc)?;
                             if !handler_restores_interrupt(&instructions) {
                                 let message = result_message(format!(
                                     "InterruptedException is caught but interrupt status is not restored in {}.{}{}",
@@ -90,57 +142,23 @@ fn is_interrupted_exception_handler(catch_type: Option<&str>) -> bool {
     )
 }
 
-fn collect_reachable_instructions<'a>(method: &'a Method, handler_pc: u32) -> Vec<&'a Instruction> {
-    let block_map = block_map(method);
-    if !block_map.contains_key(&handler_pc) {
-        return Vec::new();
-    }
-    let edge_map = edge_map(method);
-    let mut visited = BTreeSet::new();
-    let mut queue = VecDeque::new();
-    let mut instructions = Vec::new();
-
-    queue.push_back(handler_pc);
-    while let Some(offset) = queue.pop_front() {
-        if !visited.insert(offset) {
-            continue;
-        }
-        let Some(block) = block_map.get(&offset) else {
-            continue;
-        };
-        for instruction in &block.instructions {
-            instructions.push(instruction);
-        }
-        if let Some(next_blocks) = edge_map.get(&offset) {
-            for next in next_blocks {
-                if block_map.contains_key(next) {
-                    queue.push_back(*next);
-                }
-            }
-        }
-    }
-
-    instructions
-}
-
-fn block_map<'a>(method: &'a Method) -> BTreeMap<u32, &'a BasicBlock> {
-    let mut map = BTreeMap::new();
+fn collect_reachable_instructions<'a>(
+    method: &'a Method,
+    handler_pc: u32,
+) -> Result<Vec<&'a Instruction>> {
+    let semantics = ReachableInstructionSemantics { handler_pc };
+    let instruction_offsets = analyze_method(method, &semantics)?;
+    let mut instruction_map: BTreeMap<u32, &Instruction> = BTreeMap::new();
     for block in &method.cfg.blocks {
-        map.insert(block.start_offset, block);
+        for instruction in &block.instructions {
+            instruction_map.insert(instruction.offset, instruction);
+        }
     }
-    map
-}
 
-fn edge_map(method: &Method) -> BTreeMap<u32, Vec<u32>> {
-    let mut map: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
-    for edge in &method.cfg.edges {
-        map.entry(edge.from).or_default().push(edge.to);
-    }
-    for targets in map.values_mut() {
-        targets.sort();
-        targets.dedup();
-    }
-    map
+    Ok(instruction_offsets
+        .into_iter()
+        .filter_map(|offset| instruction_map.get(&offset).copied())
+        .collect())
 }
 
 fn handler_restores_interrupt(instructions: &[&Instruction]) -> bool {
