@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::OnceLock;
 
 use anyhow::Result;
 use opentelemetry::KeyValue;
@@ -9,6 +10,9 @@ use crate::engine::AnalysisContext;
 use crate::ir::{BasicBlock, CallKind, CallSite, Instruction, InstructionKind, Method};
 use crate::opcodes;
 use crate::rules::{Rule, RuleMetadata, method_location_with_line, result_message};
+
+const MAX_TRACKED_STACK_DEPTH: usize = 24;
+const MAX_TRACKED_ALLOCATIONS: usize = 4;
 
 /// Rule that detects catch handlers that drop the original exception cause.
 #[derive(Default)]
@@ -83,7 +87,6 @@ impl Rule for ExceptionCauseNotPreservedRule {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 enum Value {
-    Unknown,
     Other,
     Caught,
     New(u32),
@@ -95,7 +98,7 @@ struct ExecutionState {
     block_start: u32,
     instruction_index: usize,
     stack: Vec<Value>,
-    locals: Vec<Value>,
+    locals: BTreeMap<usize, Value>,
     preserved_allocations: BTreeSet<u32>,
 }
 
@@ -108,6 +111,7 @@ fn handler_offsets(method: &Method) -> Vec<u32> {
 }
 
 fn analyze_handler(method: &Method, handler_pc: u32) -> Result<Vec<u32>> {
+    let debug_enabled = debug_stack_dump_enabled();
     let block_map = block_map(method);
     if !block_map.contains_key(&handler_pc) {
         return Ok(Vec::new());
@@ -117,16 +121,19 @@ fn analyze_handler(method: &Method, handler_pc: u32) -> Result<Vec<u32>> {
     let mut queue = VecDeque::new();
     let mut visited = BTreeSet::new();
     let mut findings = BTreeSet::new();
+    let mut stack_depth_dumped = false;
 
     queue.push_back(ExecutionState {
         block_start: handler_pc,
         instruction_index: 0,
         stack: vec![Value::Caught],
-        locals: Vec::new(),
+        locals: BTreeMap::new(),
         preserved_allocations: BTreeSet::new(),
     });
 
     while let Some(state) = queue.pop_front() {
+        let mut state = state;
+        canonicalize_state(&mut state);
         if !visited.insert(state.clone()) {
             continue;
         }
@@ -163,6 +170,13 @@ fn analyze_handler(method: &Method, handler_pc: u32) -> Result<Vec<u32>> {
         }
 
         apply_stack_effect(method, instruction, &mut next_state)?;
+        prune_preserved_allocations(&mut next_state);
+        canonicalize_state(&mut next_state);
+        if debug_enabled && !stack_depth_dumped && next_state.stack.len() >= MAX_TRACKED_STACK_DEPTH
+        {
+            dump_stack_depth(method, handler_pc, instruction, &next_state);
+            stack_depth_dumped = true;
+        }
 
         if next_state.instruction_index < block.instructions.len() {
             queue.push_back(next_state);
@@ -186,11 +200,13 @@ fn apply_stack_effect(
         | opcodes::ALOAD_2
         | opcodes::ALOAD_3 => {
             let Some(index) = local_index_for(method, instruction) else {
-                state.stack.push(Value::Unknown);
+                push_stack(state, Value::Other);
                 return Ok(());
             };
-            ensure_local(&mut state.locals, index);
-            state.stack.push(state.locals[index]);
+            push_stack(
+                state,
+                state.locals.get(&index).copied().unwrap_or(Value::Other),
+            );
         }
         opcodes::ASTORE
         | opcodes::ASTORE_0
@@ -201,15 +217,22 @@ fn apply_stack_effect(
                 pop_or_unknown(&mut state.stack);
                 return Ok(());
             };
-            ensure_local(&mut state.locals, index);
-            state.locals[index] = pop_or_unknown(&mut state.stack);
+            let value = pop_or_unknown(&mut state.stack);
+            match value {
+                Value::Caught | Value::New(_) => {
+                    state.locals.insert(index, value);
+                }
+                Value::Other => {
+                    state.locals.remove(&index);
+                }
+            }
         }
         opcodes::NEW => {
-            state.stack.push(Value::New(instruction.offset));
+            push_stack(state, Value::New(instruction.offset));
         }
         opcodes::DUP => {
             if let Some(value) = state.stack.last().copied() {
-                state.stack.push(value);
+                push_stack(state, value);
             }
         }
         opcodes::POP => {
@@ -222,7 +245,7 @@ fn apply_stack_effect(
         opcodes::AALOAD => {
             pop_or_unknown(&mut state.stack);
             pop_or_unknown(&mut state.stack);
-            state.stack.push(Value::Other);
+            push_stack(state, Value::Other);
         }
         opcodes::AASTORE => {
             pop_or_unknown(&mut state.stack);
@@ -242,7 +265,7 @@ fn apply_stack_effect(
         | opcodes::LDC
         | opcodes::LDC_W
         | opcodes::LDC2_W => {
-            state.stack.push(Value::Other);
+            push_stack(state, Value::Other);
         }
         opcodes::IFEQ
         | opcodes::IFNE
@@ -266,6 +289,88 @@ fn apply_stack_effect(
         | opcodes::IF_ACMPNE => {
             pop_or_unknown(&mut state.stack);
             pop_or_unknown(&mut state.stack);
+        }
+        // Primitive and non-reference loads.
+        0x15..=0x18 | 0x1a..=0x29 => {
+            push_stack(state, Value::Other);
+        }
+        // Primitive array loads.
+        0x2e..=0x31 | 0x33..=0x35 => {
+            pop_n(&mut state.stack, 2);
+            push_stack(state, Value::Other);
+        }
+        // Primitive stores.
+        0x36 | 0x38 | 0x3b..=0x3e | 0x43..=0x46 => {
+            pop_n(&mut state.stack, 1);
+        }
+        0x37 | 0x39 | 0x3f..=0x42 | 0x47..=0x4a => {
+            pop_n(&mut state.stack, 2);
+        }
+        // Primitive array stores.
+        0x4f..=0x52 | 0x54..=0x56 => {
+            pop_n(&mut state.stack, 3);
+        }
+        // Stack shuffling opcodes.
+        0x5a..=0x5e => {
+            push_stack(state, Value::Other);
+        }
+        0x5f => {
+            let right = pop_or_unknown(&mut state.stack);
+            let left = pop_or_unknown(&mut state.stack);
+            push_stack(state, right);
+            push_stack(state, left);
+        }
+        // Primitive arithmetic.
+        0x60..=0x73 | 0x78..=0x83 | 0x94..=0x98 => {
+            pop_n(&mut state.stack, 2);
+            push_stack(state, Value::Other);
+        }
+        0x74..=0x77 | 0x85..=0x93 => {
+            pop_n(&mut state.stack, 1);
+            push_stack(state, Value::Other);
+        }
+        // iinc has no stack effect.
+        0x84 => {}
+        // Legacy subroutine opcodes.
+        opcodes::JSR | opcodes::JSR_W => {
+            push_stack(state, Value::Other);
+        }
+        opcodes::GOTO | opcodes::GOTO_W => {}
+        // Field access.
+        0xb2 => {
+            push_stack(state, Value::Other);
+        }
+        0xb3 => {
+            pop_n(&mut state.stack, 1);
+        }
+        0xb4 => {
+            pop_n(&mut state.stack, 1);
+            push_stack(state, Value::Other);
+        }
+        0xb5 => {
+            pop_n(&mut state.stack, 2);
+        }
+        // INVOKEDYNAMIC callsites are currently not decoded into CallSite.
+        opcodes::INVOKEDYNAMIC => {
+            pop_n(&mut state.stack, 1);
+            push_stack(state, Value::Other);
+        }
+        // Array/type/monitor opcodes.
+        opcodes::NEWARRAY | opcodes::ANEWARRAY | opcodes::ARRAYLENGTH | 0xc0 | 0xc1 => {
+            pop_n(&mut state.stack, 1);
+            push_stack(state, Value::Other);
+        }
+        0xc2 | 0xc3 => {
+            pop_n(&mut state.stack, 1);
+        }
+        opcodes::MULTIANEWARRAY => {
+            let dims = method
+                .bytecode
+                .get(instruction.offset as usize + 3)
+                .copied()
+                .unwrap_or(1);
+            pop_n(&mut state.stack, dims as usize);
+            push_stack(state, Value::Other);
         }
         _ => {}
     }
@@ -321,10 +426,80 @@ fn handle_invoke(call: &CallSite, state: &mut ExecutionState) -> Result<()> {
     }
 
     if let Some(value) = return_value {
-        state.stack.push(value);
+        push_stack(state, value);
     }
 
     Ok(())
+}
+
+fn push_stack(state: &mut ExecutionState, value: Value) {
+    // Keep the state space finite even when unsupported opcodes appear inside loops.
+    if state.stack.len() >= MAX_TRACKED_STACK_DEPTH {
+        state.stack.remove(0);
+    }
+    state.stack.push(value);
+}
+
+fn prune_preserved_allocations(state: &mut ExecutionState) {
+    let mut live_allocations = BTreeSet::new();
+    for value in state.stack.iter().chain(state.locals.values()) {
+        if let Value::New(offset) = value {
+            live_allocations.insert(*offset);
+        }
+    }
+    let tracked_allocations: BTreeSet<u32> = live_allocations
+        .iter()
+        .rev()
+        .take(MAX_TRACKED_ALLOCATIONS)
+        .copied()
+        .collect();
+
+    for value in &mut state.stack {
+        if let Value::New(offset) = *value
+            && !tracked_allocations.contains(&offset)
+        {
+            *value = Value::Other;
+        }
+    }
+    state.locals.retain(|_, value| match *value {
+        Value::Caught => true,
+        Value::New(offset) => tracked_allocations.contains(&offset),
+        Value::Other => false,
+    });
+    state
+        .preserved_allocations
+        .retain(|offset| tracked_allocations.contains(offset));
+}
+
+fn debug_stack_dump_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("INSPEQUTE_DEBUG_EXCEPTION_CAUSE_STACK")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    })
+}
+
+fn dump_stack_depth(
+    method: &Method,
+    handler_pc: u32,
+    instruction: &Instruction,
+    state: &ExecutionState,
+) {
+    if !debug_stack_dump_enabled() {
+        return;
+    }
+
+    eprintln!(
+        "exception_cause_not_preserved debug: stack depth reached limit method={}{} handler_pc={} offset={} opcode=0x{:02x} depth={} top={:?}",
+        method.name,
+        method.descriptor,
+        handler_pc,
+        instruction.offset,
+        instruction.opcode,
+        state.stack.len(),
+        state.stack.iter().rev().take(8).collect::<Vec<_>>()
+    );
 }
 
 fn enqueue_successors(
@@ -378,14 +553,69 @@ fn local_index_for(method: &Method, instruction: &Instruction) -> Option<usize> 
     }
 }
 
-fn ensure_local(locals: &mut Vec<Value>, index: usize) {
-    if locals.len() <= index {
-        locals.resize(index + 1, Value::Unknown);
+fn pop_or_unknown(stack: &mut Vec<Value>) -> Value {
+    stack.pop().unwrap_or(Value::Other)
+}
+
+fn pop_n(stack: &mut Vec<Value>, count: usize) {
+    for _ in 0..count {
+        pop_or_unknown(stack);
     }
 }
 
-fn pop_or_unknown(stack: &mut Vec<Value>) -> Value {
-    stack.pop().unwrap_or(Value::Unknown)
+fn canonicalize_state(state: &mut ExecutionState) {
+    let mut mapping: BTreeMap<u32, u32> = BTreeMap::new();
+    let mut next_id = 0u32;
+
+    for value in &state.stack {
+        if let Value::New(offset) = *value {
+            mapping.entry(offset).or_insert_with(|| {
+                let id = next_id;
+                next_id += 1;
+                id
+            });
+        }
+    }
+    for value in state.locals.values() {
+        if let Value::New(offset) = *value {
+            mapping.entry(offset).or_insert_with(|| {
+                let id = next_id;
+                next_id += 1;
+                id
+            });
+        }
+    }
+    for offset in &state.preserved_allocations {
+        mapping.entry(*offset).or_insert_with(|| {
+            let id = next_id;
+            next_id += 1;
+            id
+        });
+    }
+
+    if mapping.is_empty() {
+        return;
+    }
+
+    for value in &mut state.stack {
+        if let Value::New(offset) = *value
+            && let Some(mapped) = mapping.get(&offset)
+        {
+            *value = Value::New(*mapped);
+        }
+    }
+    for value in state.locals.values_mut() {
+        if let Value::New(offset) = *value
+            && let Some(mapped) = mapping.get(&offset)
+        {
+            *value = Value::New(*mapped);
+        }
+    }
+    state.preserved_allocations = state
+        .preserved_allocations
+        .iter()
+        .filter_map(|offset| mapping.get(offset).copied())
+        .collect();
 }
 
 fn is_return_opcode(opcode: u8) -> bool {
@@ -620,5 +850,37 @@ public class ClassG {
 
         let messages = analyze_sources(sources);
         assert!(messages.is_empty());
+    }
+
+    #[test]
+    fn exception_cause_reports_after_primitive_loop_in_catch() {
+        let sources = vec![SourceFile {
+            path: "com/example/ClassH.java".to_string(),
+            contents: r#"
+package com.example;
+
+public class ClassH {
+    public void methodEight(int varTwo) {
+        try {
+            MethodX();
+        } catch (Exception varOne) {
+            int varThree = 0;
+            while (varThree < varTwo) {
+                varThree++;
+            }
+            throw new RuntimeException("failed");
+        }
+    }
+
+    private void MethodX() {
+        throw new IllegalStateException("boom");
+    }
+}
+"#
+            .to_string(),
+        }];
+
+        let messages = analyze_sources(sources);
+        assert!(messages.iter().any(|msg| msg.contains("original cause")));
     }
 }
