@@ -25,3 +25,6 @@ Append one entry each time verify returns `No-Go`.
 - rule idea: Detect return statements inside finally blocks that override exceptions or prior returns.  
 - no-go reason: The implementation emits the spec message text verbatim via `result_message("Return in finally overrides exceptions or prior returns. Move the return outside the finally block or return after the try/finally.")` in `src/rules/return_in_finally/mod.rs` within the change set. This matches the spec Output message requirement. Evidence: `verify-input/diff.patch`.
 - run-url: https://github.com/KengoTODA/inspequte/actions/runs/21928662084
+- status: implemented (2026-02-12)
+- resolution-ref: https://github.com/KengoTODA/inspequte/pull/47
+- actions: imported rule spec/plan/implementation from PR #47, fixed harness output type compatibility, registered `RETURN_IN_FINALLY`, and validated with `cargo fmt`, `cargo build`, `JAVA_HOME=<Java 21> cargo test`, and `cargo audit --format sarif`.
