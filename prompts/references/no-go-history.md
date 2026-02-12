@@ -8,6 +8,9 @@ Append one entry each time verify returns `No-Go`.
 - `rule idea`: short summary used in ideation
 - `no-go reason`: concise reason summary from verify
 - `run-url`: GitHub Actions run URL for traceability
+- `status` (optional): implementation status, for example `implemented (2026-02-12)`
+- `resolution-ref` (optional): commit hash or PR URL that resolved the No-Go
+- `actions` (optional): short summary of remediation work and validation
 
 ## Entries
 

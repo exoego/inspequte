@@ -30,11 +30,12 @@ The name combines "inspect" and "cute". The CLI command is `inspequte`.
 - Deterministic SARIF v2.1.0 output for LLM-friendly automation.
 
 ## Local rule workflow (Codex skills)
-Four local skills are available under `.codex/skills/` for sequential rule work:
+Five local skills are available under `.codex/skills/` for sequential rule work:
 - `inspequte-rule-plan`
 - `inspequte-rule-spec`
 - `inspequte-rule-impl`
 - `inspequte-rule-verify`
+- `inspequte-rule-no-go-resume`
 
 Recommended sequence:
 1. Plan: run `inspequte-rule-plan` with a short rule idea and target `rule-id`.
@@ -49,12 +50,19 @@ Recommended sequence:
    ```
 5. Verify: run `inspequte-rule-verify` using `verify-input/` only (no plan/log context).
 
+When a rule implementation was marked No-Go on GitHub Actions, run
+`inspequte-rule-no-go-resume` to:
+1. inherit `plan/spec/impl` from the source PR,
+2. close missing implementation/test gaps from the No-Go reason, and
+3. update `prompts/references/no-go-history.md` with implementation status and remediation notes.
+
 Use split prompts to reduce context confusion:
 - `prompts/ideate-rule.md`
 - `prompts/authoring-plan.md`
 - `prompts/authoring-spec.md`
 - `prompts/authoring-impl.md`
 - `prompts/authoring-verify.md`
+- `prompts/authoring-no-go-resume.md`
 
 Orchestration reference:
 - `prompts/authoring-rule.md`

@@ -7,6 +7,7 @@ Use stage-specific prompts to reduce context mixing:
 3. `prompts/authoring-spec.md`
 4. `prompts/authoring-impl.md`
 5. `prompts/authoring-verify.md`
+6. `prompts/authoring-no-go-resume.md` (for resuming a No-Go rule)
 
 ## Recommended sequence
 1. Run ideation (`prompts/ideate-rule.md`) to get:
@@ -24,6 +25,7 @@ Use stage-specific prompts to reduce context mixing:
 6. Run verify (`prompts/authoring-verify.md`) using only `verify-input/`.
 7. Regenerate deterministic rule docs:
    - `scripts/generate-rule-docs.sh`
+8. If verify result is `No-Go`, resume with `prompts/authoring-no-go-resume.md`.
 
 ## Non-negotiable rules
 - `spec.md` is the contract.
