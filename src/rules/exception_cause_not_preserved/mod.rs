@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
@@ -6,7 +6,10 @@ use anyhow::Result;
 use opentelemetry::KeyValue;
 use serde_sarif::sarif::Result as SarifResult;
 
-use crate::dataflow::opcode_semantics::{ApplyOutcome, ValueDomain, apply_default_semantics};
+use crate::dataflow::opcode_semantics::{
+    ApplyOutcome, SemanticsCoverage, SemanticsDebugConfig, SemanticsHooks, ValueDomain,
+    apply_semantics, opcode_semantics_debug_enabled,
+};
 use crate::dataflow::stack_machine::{StackMachine, StackMachineConfig};
 use crate::dataflow::worklist::{
     BlockEndStep, InstructionStep, WorklistSemantics, WorklistState, analyze_method,
@@ -139,7 +142,9 @@ impl WorklistState for ExecutionState {
 struct HandlerSemantics {
     handler_pc: u32,
     debug_enabled: bool,
+    opcode_debug_enabled: bool,
     stack_depth_dumped: Cell<bool>,
+    semantics_coverage: RefCell<SemanticsCoverage>,
 }
 
 impl HandlerSemantics {
@@ -147,8 +152,14 @@ impl HandlerSemantics {
         Self {
             handler_pc,
             debug_enabled: debug_stack_dump_enabled(),
+            opcode_debug_enabled: opcode_semantics_debug_enabled(),
             stack_depth_dumped: Cell::new(false),
+            semantics_coverage: RefCell::new(SemanticsCoverage::default()),
         }
+    }
+
+    fn coverage_snapshot(&self) -> SemanticsCoverage {
+        self.semantics_coverage.borrow().clone()
     }
 }
 
@@ -176,7 +187,15 @@ impl WorklistSemantics for HandlerSemantics {
         state: &mut Self::State,
     ) -> Result<InstructionStep<Self::Finding>> {
         if is_return_opcode(instruction.opcode) {
-            apply_stack_effect(method, instruction, state)?;
+            let mut coverage = SemanticsCoverage::default();
+            apply_stack_effect(
+                method,
+                instruction,
+                state,
+                &mut coverage,
+                self.opcode_debug_enabled,
+            )?;
+            self.semantics_coverage.borrow_mut().merge_from(&coverage);
             return Ok(InstructionStep::terminate_path());
         }
 
@@ -190,7 +209,15 @@ impl WorklistSemantics for HandlerSemantics {
             return Ok(InstructionStep::terminate_path());
         }
 
-        apply_stack_effect(method, instruction, state)?;
+        let mut coverage = SemanticsCoverage::default();
+        apply_stack_effect(
+            method,
+            instruction,
+            state,
+            &mut coverage,
+            self.opcode_debug_enabled,
+        )?;
+        self.semantics_coverage.borrow_mut().merge_from(&coverage);
         prune_preserved_allocations(state);
         if self.debug_enabled
             && !self.stack_depth_dumped.get()
@@ -233,6 +260,25 @@ fn handler_offsets(method: &Method) -> Vec<u32> {
 fn analyze_handler(method: &Method, handler_pc: u32) -> Result<Vec<u32>> {
     let semantics = HandlerSemantics::new(handler_pc);
     let findings = analyze_method(method, &semantics)?;
+    let coverage = semantics.coverage_snapshot();
+    if semantics.opcode_debug_enabled && coverage.fallback_not_handled > 0 {
+        let invoke_fallbacks = coverage.fallback_count(opcodes::INVOKEVIRTUAL)
+            + coverage.fallback_count(opcodes::INVOKESPECIAL)
+            + coverage.fallback_count(opcodes::INVOKESTATIC)
+            + coverage.fallback_count(opcodes::INVOKEINTERFACE)
+            + coverage.fallback_count(opcodes::INVOKEDYNAMIC);
+        eprintln!(
+            "opcode_semantics debug: rule=EXCEPTION_CAUSE_NOT_PRESERVED method={}{} handler_pc={} default={} hook={} fallback={} new_hook={} invoke_fallback={}",
+            method.name,
+            method.descriptor,
+            handler_pc,
+            coverage.applied_by_default,
+            coverage.applied_by_hook,
+            coverage.fallback_not_handled,
+            coverage.hook_override_count(opcodes::NEW),
+            invoke_fallbacks
+        );
+    }
     Ok(findings
         .into_iter()
         .collect::<BTreeSet<_>>()
@@ -257,114 +303,26 @@ fn apply_stack_effect(
     method: &Method,
     instruction: &Instruction,
     state: &mut ExecutionState,
+    coverage: &mut SemanticsCoverage,
+    opcode_debug_enabled: bool,
 ) -> Result<()> {
     let domain = ExceptionValueDomain;
-    if instruction.opcode != opcodes::NEW
-        && apply_default_semantics(
-            &mut state.machine,
-            method,
-            instruction.offset as usize,
-            instruction.opcode,
-            &domain,
-        ) == ApplyOutcome::Applied
-    {
-        return Ok(());
-    }
-
-    match instruction.opcode {
-        opcodes::NEW => {
-            state.machine.push(Value::New(instruction.offset));
-        }
-        opcodes::AALOAD => {
-            state.machine.pop_n(2);
-            state.machine.push(Value::Other);
-        }
-        opcodes::AASTORE => {
-            state.machine.pop_n(3);
-        }
-        opcodes::IF_ACMPEQ | opcodes::IF_ACMPNE => {
-            state.machine.pop_n(2);
-        }
-        // Primitive and non-reference loads not covered by table-driven defaults.
-        0x15..=0x18 | 0x1a..=0x29 => {
-            state.machine.push(Value::Other);
-        }
-        // Primitive array loads.
-        0x2e..=0x31 | 0x33..=0x35 => {
-            state.machine.pop_n(2);
-            state.machine.push(Value::Other);
-        }
-        // Primitive stores not covered by table-driven defaults.
-        0x36 | 0x38 | 0x3b..=0x3e | 0x43..=0x46 => {
-            state.machine.pop_n(1);
-        }
-        // Primitive stores not covered by table-driven defaults.
-        0x37 | 0x39 | 0x3f..=0x42 | 0x47..=0x4a => state.machine.pop_n(2),
-        // Primitive array stores.
-        0x4f..=0x52 | 0x54..=0x56 => {
-            state.machine.pop_n(3);
-        }
-        // Stack shuffling opcodes.
-        0x5a..=0x5e => {
-            state.machine.push(Value::Other);
-        }
-        0x5f => {
-            let right = state.machine.pop();
-            let left = state.machine.pop();
-            state.machine.push(right);
-            state.machine.push(left);
-        }
-        // Primitive arithmetic.
-        0x60..=0x73 | 0x78..=0x83 | 0x94..=0x98 => {
-            state.machine.pop_n(2);
-            state.machine.push(Value::Other);
-        }
-        0x74..=0x77 | 0x85..=0x93 => {
-            state.machine.pop_n(1);
-            state.machine.push(Value::Other);
-        }
-        // iinc has no stack effect.
-        0x84 => {}
-        // Legacy subroutine opcodes.
-        opcodes::JSR | opcodes::JSR_W => {
-            state.machine.push(Value::Other);
-        }
-        opcodes::GOTO | opcodes::GOTO_W => {}
-        // Field access.
-        0xb2 => {
-            state.machine.push(Value::Other);
-        }
-        0xb3 => {
-            state.machine.pop_n(1);
-        }
-        0xb4 => {
-            state.machine.pop_n(1);
-            state.machine.push(Value::Other);
-        }
-        0xb5 => {
-            state.machine.pop_n(2);
-        }
-        // INVOKEDYNAMIC is handled from InstructionKind to apply descriptor-based stack effects.
-        opcodes::INVOKEDYNAMIC => {}
-        // Array/type/monitor opcodes.
-        opcodes::NEWARRAY | opcodes::ANEWARRAY | opcodes::ARRAYLENGTH | 0xc0 | 0xc1 => {
-            state.machine.pop_n(1);
-            state.machine.push(Value::Other);
-        }
-        0xc2 | 0xc3 => {
-            state.machine.pop_n(1);
-        }
-        opcodes::MULTIANEWARRAY => {
-            let dims = method
-                .bytecode
-                .get(instruction.offset as usize + 3)
-                .copied()
-                .unwrap_or(1);
-            state.machine.pop_n(dims as usize);
-            state.machine.push(Value::Other);
-        }
-        _ => {}
-    }
+    let mut hooks = ExceptionSemanticsHook {
+        allocation_offset: instruction.offset,
+    };
+    let _ = apply_semantics(
+        &mut state.machine,
+        method,
+        instruction.offset as usize,
+        instruction.opcode,
+        &domain,
+        &mut hooks,
+        coverage,
+        SemanticsDebugConfig {
+            enabled: opcode_debug_enabled,
+            rule_id: "EXCEPTION_CAUSE_NOT_PRESERVED",
+        },
+    );
 
     match &instruction.kind {
         InstructionKind::Invoke(call) => handle_invoke(call, state)?,
@@ -375,6 +333,27 @@ fn apply_stack_effect(
     }
 
     Ok(())
+}
+
+/// Rule-specific hook that preserves `new` allocation identities.
+struct ExceptionSemanticsHook {
+    allocation_offset: u32,
+}
+
+impl SemanticsHooks<Value> for ExceptionSemanticsHook {
+    fn pre_apply(
+        &mut self,
+        machine: &mut StackMachine<Value>,
+        _method: &Method,
+        _offset: usize,
+        opcode: u8,
+    ) -> ApplyOutcome {
+        if opcode == opcodes::NEW {
+            machine.push(Value::New(self.allocation_offset));
+            return ApplyOutcome::Applied;
+        }
+        ApplyOutcome::NotHandled
+    }
 }
 
 fn handle_invoke(call: &CallSite, state: &mut ExecutionState) -> Result<()> {

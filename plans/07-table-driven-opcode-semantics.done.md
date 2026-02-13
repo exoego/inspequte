@@ -38,3 +38,7 @@ Per-rule opcode `match` blocks duplicate generic stack effects and leave coverag
 ## Complexity Estimate
 Medium
 
+## Post-mortem
+- Went well: shared semantics now covers common load/store/arith/field/array/control opcodes, so rule code paths became smaller and more uniform.
+- Tricky: preserving rule-specific identity tracking (for `NEW`) required hook-first precedence to avoid losing symbolic allocation information.
+- Follow-up: migrate additional stack-simulating rules onto `apply_semantics` and tighten fallback expectations per rule with explicit assertions.

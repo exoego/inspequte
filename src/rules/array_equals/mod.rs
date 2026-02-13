@@ -6,7 +6,10 @@ use jdescriptor::{MethodDescriptor, TypeDescriptor};
 use opentelemetry::KeyValue;
 use serde_sarif::sarif::Result as SarifResult;
 
-use crate::dataflow::opcode_semantics::{ApplyOutcome, ValueDomain, apply_default_semantics};
+use crate::dataflow::opcode_semantics::{
+    ApplyOutcome, SemanticsCoverage, SemanticsDebugConfig, SemanticsHooks, ValueDomain,
+    apply_semantics, opcode_semantics_debug_enabled,
+};
 use crate::dataflow::stack_machine::StackMachine;
 use crate::descriptor::method_param_count;
 use crate::engine::AnalysisContext;
@@ -81,6 +84,73 @@ impl ValueDomain<ValueKind> for ArrayValueDomain {
     }
 }
 
+/// Rule-specific hook that keeps array-aware semantics in one place.
+#[derive(Default)]
+struct ArraySemanticsHook {
+    reference_equality_offsets: Vec<u32>,
+}
+
+impl ArraySemanticsHook {
+    fn take_reference_equality_offsets(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.reference_equality_offsets)
+    }
+}
+
+impl SemanticsHooks<ValueKind> for ArraySemanticsHook {
+    fn pre_apply(
+        &mut self,
+        machine: &mut StackMachine<ValueKind>,
+        method: &Method,
+        offset: usize,
+        opcode: u8,
+    ) -> ApplyOutcome {
+        match opcode {
+            opcodes::NEWARRAY | opcodes::ANEWARRAY => {
+                machine.pop();
+                machine.push(ValueKind::Array(1));
+                ApplyOutcome::Applied
+            }
+            opcodes::MULTIANEWARRAY => {
+                let dims = method.bytecode.get(offset + 3).copied().unwrap_or(0);
+                for _ in 0..dims {
+                    machine.pop();
+                }
+                if dims > 0 {
+                    machine.push(ValueKind::Array(dims));
+                } else {
+                    machine.push(ValueKind::Unknown);
+                }
+                ApplyOutcome::Applied
+            }
+            opcodes::AALOAD => {
+                machine.pop();
+                let array = machine.pop();
+                let value = match array {
+                    ValueKind::Array(dims) if dims > 1 => ValueKind::Array(dims - 1),
+                    ValueKind::Array(_) => ValueKind::NonArray,
+                    _ => ValueKind::Unknown,
+                };
+                machine.push(value);
+                ApplyOutcome::Applied
+            }
+            opcodes::ARRAYLENGTH => {
+                machine.pop();
+                machine.push(ValueKind::NonArray);
+                ApplyOutcome::Applied
+            }
+            opcodes::IF_ACMPEQ | opcodes::IF_ACMPNE => {
+                let right = machine.pop();
+                let left = machine.pop();
+                if matches!(left, ValueKind::Array(_)) && matches!(right, ValueKind::Array(_)) {
+                    self.reference_equality_offsets.push(offset as u32);
+                }
+                ApplyOutcome::Applied
+            }
+            _ => ApplyOutcome::NotHandled,
+        }
+    }
+}
+
 fn analyze_method(
     class_name: &str,
     method: &Method,
@@ -94,73 +164,54 @@ fn analyze_method(
 
     let mut machine = StackMachine::new(ValueKind::Unknown);
     let domain = ArrayValueDomain;
+    let mut hooks = ArraySemanticsHook::default();
+    let mut coverage = SemanticsCoverage::default();
+    let debug = SemanticsDebugConfig {
+        enabled: opcode_semantics_debug_enabled(),
+        rule_id: "ARRAY_EQUALS",
+    };
     for (index, value) in initial_locals(method)? {
         machine.store_local(index, value);
     }
     let mut offset = 0usize;
     while offset < method.bytecode.len() {
         let opcode = method.bytecode[offset];
-        if apply_default_semantics(&mut machine, method, offset, opcode, &domain)
-            == ApplyOutcome::Applied
+        if apply_semantics(
+            &mut machine,
+            method,
+            offset,
+            opcode,
+            &domain,
+            &mut hooks,
+            &mut coverage,
+            debug,
+        ) == ApplyOutcome::Applied
         {
+            for finding_offset in hooks.take_reference_equality_offsets() {
+                let message = result_message(format!(
+                    "Array comparison uses reference equality: {}.{}{}",
+                    class_name, method.name, method.descriptor
+                ));
+                let line = method.line_for_offset(finding_offset);
+                let location = method_location_with_line(
+                    class_name,
+                    &method.name,
+                    &method.descriptor,
+                    artifact_uri,
+                    line,
+                );
+                results.push(
+                    SarifResult::builder()
+                        .message(message)
+                        .locations(vec![location])
+                        .build(),
+                );
+            }
             let length = crate::scan::opcode_length(&method.bytecode, offset)?;
             offset += length;
             continue;
         }
         match opcode {
-            opcodes::NEWARRAY | opcodes::ANEWARRAY => {
-                machine.pop();
-                machine.push(ValueKind::Array(1));
-            }
-            opcodes::MULTIANEWARRAY => {
-                let dims = method.bytecode.get(offset + 3).copied().unwrap_or(0);
-                for _ in 0..dims {
-                    machine.pop();
-                }
-                if dims > 0 {
-                    machine.push(ValueKind::Array(dims));
-                } else {
-                    machine.push(ValueKind::Unknown);
-                }
-            }
-            opcodes::AALOAD => {
-                machine.pop();
-                let array = machine.pop();
-                let value = match array {
-                    ValueKind::Array(dims) if dims > 1 => ValueKind::Array(dims - 1),
-                    ValueKind::Array(_) => ValueKind::NonArray,
-                    _ => ValueKind::Unknown,
-                };
-                machine.push(value);
-            }
-            opcodes::ARRAYLENGTH => {
-                machine.pop();
-                machine.push(ValueKind::NonArray);
-            }
-            opcodes::IF_ACMPEQ | opcodes::IF_ACMPNE => {
-                let right = machine.pop();
-                let left = machine.pop();
-                if matches!(left, ValueKind::Array(_)) && matches!(right, ValueKind::Array(_)) {
-                    let message = result_message(format!(
-                        "Array comparison uses reference equality: {}.{}{}",
-                        class_name, method.name, method.descriptor
-                    ));
-                    let line = method.line_for_offset(offset as u32);
-                    let location = method_location_with_line(
-                        class_name,
-                        &method.name,
-                        &method.descriptor,
-                        artifact_uri,
-                        line,
-                    );
-                    results.push(
-                        SarifResult::builder()
-                            .message(message)
-                            .locations(vec![location])
-                            .build(),
-                    );
-                }
-            }
             opcodes::INVOKEVIRTUAL | opcodes::INVOKESPECIAL | opcodes::INVOKEINTERFACE => {
                 if let Some(call) = callsites.get(&(offset as u32)) {
                     let arg_count = method_param_count(&call.descriptor)?;
@@ -211,6 +262,24 @@ fn analyze_method(
         }
         let length = crate::scan::opcode_length(&method.bytecode, offset)?;
         offset += length;
+    }
+
+    if debug.enabled && coverage.fallback_not_handled > 0 {
+        let invoke_fallbacks = coverage.fallback_count(opcodes::INVOKEVIRTUAL)
+            + coverage.fallback_count(opcodes::INVOKESPECIAL)
+            + coverage.fallback_count(opcodes::INVOKESTATIC)
+            + coverage.fallback_count(opcodes::INVOKEINTERFACE);
+        eprintln!(
+            "opcode_semantics debug: rule=ARRAY_EQUALS method={}{} default={} hook={} fallback={} if_acmp_hook={} invoke_fallback={}",
+            method.name,
+            method.descriptor,
+            coverage.applied_by_default,
+            coverage.applied_by_hook,
+            coverage.fallback_not_handled,
+            coverage.hook_override_count(opcodes::IF_ACMPEQ)
+                + coverage.hook_override_count(opcodes::IF_ACMPNE),
+            invoke_fallbacks
+        );
     }
 
     Ok(results)
