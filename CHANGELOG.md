@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.18.0](https://github.com/KengoTODA/inspequte/compare/inspequte-v0.17.0...inspequte-v0.18.0) (2026-02-13)
+
+
+### Features
+
+* **ci:** automate jaeger benchmark reporting in release flow ([3c0abe4](https://github.com/KengoTODA/inspequte/commit/3c0abe4e701e71356722dc6dffa1006fc2f0f86d))
+* **rules:** add mutate_unmodifiable_collection rule ([38ed629](https://github.com/KengoTODA/inspequte/commit/38ed629123983874cb0fe90a339a2de747e057f2))
+* **rules:** add STRING_CASE_WITHOUT_LOCALE rule ([7fa41fd](https://github.com/KengoTODA/inspequte/commit/7fa41fdfe72f93ce9454a2330d4ea4494f2d3769))
+* **skill:** add jaeger spotbugs benchmark tracing skill ([6604e65](https://github.com/KengoTODA/inspequte/commit/6604e657c828419fc8fc696da9ff3d779c9402db))
+
+
+### Bug Fixes
+
+* **ci:** attach benchmark screenshot to PR comments via app token ([c86032d](https://github.com/KengoTODA/inspequte/commit/c86032d6ec5a44bb985e743d8176245a00d820fd))
+* **ci:** run bench-spotbugs with bash pipefail support ([3c2d87c](https://github.com/KengoTODA/inspequte/commit/3c2d87c7337c1da83aa66d76931562150ccfe7f2))
+* **ci:** use workspace path for benchmark screenshot publish ([d816f83](https://github.com/KengoTODA/inspequte/commit/d816f8322a8d6302bdb40158cbf92603a879b1f5))
+
+
+### Performance Improvements
+
+* **array_equals:** reduce invoke handling overhead ([e128230](https://github.com/KengoTODA/inspequte/commit/e1282306d6be1d35082d2f6f125fac85447b2cbe))
+
 ## [0.17.0](https://github.com/KengoTODA/inspequte/compare/inspequte-v0.16.0...inspequte-v0.17.0) (2026-02-13)
 
 
