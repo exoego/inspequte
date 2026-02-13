@@ -12,6 +12,8 @@ jobs:
       rust_release_created: ${{ steps.release.outputs.release_created }}
       rust_tag_name: ${{ steps.release.outputs.tag_name }}
       rust_sha: ${{ steps.release.outputs.sha }}
+      prs_created: ${{ steps.release.outputs.prs_created }}
+      prs: ${{ steps.release.outputs.prs }}
       gradle_plugin_release_created: ${{ steps.release.outputs['gradle-plugin--release_created'] }}
       gradle_plugin_tag_name: ${{ steps.release.outputs['gradle-plugin--tag_name'] }}
       gradle_plugin_sha: ${{ steps.release.outputs['gradle-plugin--sha'] }}
@@ -161,11 +163,181 @@ jobs:
           esac
           gh release upload "${TAG_NAME}" "${asset}" --clobber
 
+  benchmark-release-jaeger:
+    runs-on: ubuntu-latest
+    needs: release-please
+    if: needs.release-please.outputs.prs_created == 'true' || needs.release-please.outputs.rust_release_created == 'true'
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      rust_pr_number: ${{ steps.resolve-pr.outputs.pr_number }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+      - name: Start Jaeger, run benchmark, export trace
+        id: bench
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          .codex/skills/jaeger-spotbugs-benchmark/scripts/start-jaeger.sh
+          .codex/skills/jaeger-spotbugs-benchmark/scripts/run-bench-spotbugs-with-otel.sh 1
+
+          trace_json=""
+          for attempt in $(seq 1 20); do
+            if trace_json="$(
+              .codex/skills/jaeger-spotbugs-benchmark/scripts/export-jaeger-trace.sh 2>/dev/null
+            )"; then
+              break
+            fi
+            sleep 3
+          done
+
+          if [[ -z "${trace_json}" || ! -f "${trace_json}" ]]; then
+            echo "Failed to export Jaeger trace JSON after benchmark run."
+            exit 1
+          fi
+
+          trace_id="$(basename "${trace_json}" .json)"
+          trace_id="${trace_id#jaeger-trace-}"
+
+          npm install --no-save --no-package-lock playwright@1.53.0
+          npx playwright install --with-deps chromium
+          screenshot_png="$(node scripts/capture-jaeger-trace-screenshot.mjs "${trace_id}")"
+
+          .codex/skills/jaeger-spotbugs-benchmark/scripts/analyze-trace-json.sh "${trace_json}" \
+            | tee target/bench/analyze-trace.log
+
+          summary_json="${trace_json%.json}.summary.json"
+          if [[ ! -f "${summary_json}" ]]; then
+            echo "Summary JSON was not generated: ${summary_json}"
+            exit 1
+          fi
+
+          slowest_rule_id="$(jq -r '.slowest_rule.id // ""' "${summary_json}")"
+          slowest_rule_total_ms="$(jq -r '.slowest_rule.total_duration_ms // 0' "${summary_json}")"
+          slowest_rule_count="$(jq -r '.slowest_rule.span_count // 0' "${summary_json}")"
+          slowest_jar_id="$(jq -r '.slowest_jar.id // ""' "${summary_json}")"
+          slowest_jar_total_ms="$(jq -r '.slowest_jar.total_duration_ms // 0' "${summary_json}")"
+          slowest_jar_count="$(jq -r '.slowest_jar.span_count // 0' "${summary_json}")"
+          slowest_class_id="$(jq -r '.slowest_class.id // ""' "${summary_json}")"
+          slowest_class_total_ms="$(jq -r '.slowest_class.total_duration_ms // 0' "${summary_json}")"
+          slowest_class_count="$(jq -r '.slowest_class.span_count // 0' "${summary_json}")"
+
+          report_md="target/bench/benchmark-report.md"
+          {
+            echo "## Bottleneck Report"
+            echo "- Trace ID: ${trace_id}"
+            echo "- Screenshot: ${screenshot_png}"
+            echo "- Slowest rule: ${slowest_rule_id} (${slowest_rule_total_ms} ms total across ${slowest_rule_count} spans)"
+            echo "- Slowest jar: ${slowest_jar_id} (${slowest_jar_total_ms} ms total across ${slowest_jar_count} spans)"
+            echo "- Slowest class: ${slowest_class_id} (${slowest_class_total_ms} ms total across ${slowest_class_count} spans)"
+            echo "- Investigation:"
+            echo "  - Screenshot evidence: Captured after expanding one level of timeline context via Collapse +1."
+            echo "  - Trace evidence: Slowest rule/jar/class are extracted from aggregated span durations in ${summary_json}."
+            echo "  - Next action: Prioritize optimization in the slowest rule, then verify jar/class-level impact in the next run."
+          } > "${report_md}"
+
+          {
+            echo "trace_id=${trace_id}"
+            echo "trace_json=${trace_json}"
+            echo "screenshot_png=${screenshot_png}"
+            echo "summary_json=${summary_json}"
+            echo "report_md=${report_md}"
+          } >> "${GITHUB_OUTPUT}"
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: jaeger-spotbugs-benchmark
+          path: |
+            target/bench/spotbugs.log
+            target/bench/analyze-trace.log
+            target/bench/benchmark-report.md
+            target/bench/jaeger-trace-*.json
+            target/bench/jaeger-trace-*.summary.json
+            target/bench/jaeger-trace-*.png
+          if-no-files-found: error
+      - name: Resolve Rust release PR number
+        id: resolve-pr
+        if: needs.release-please.outputs.prs_created == 'true'
+        env:
+          PRS_JSON: ${{ needs.release-please.outputs.prs }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr_number="$(
+            printf '%s' "${PRS_JSON}" \
+              | jq -r 'if type == "array" then (.[0].number // empty) elif type == "object" then (.number // empty) else empty end'
+          )"
+          echo "pr_number=${pr_number}" >> "${GITHUB_OUTPUT}"
+      - name: Post benchmark report to release PR
+        if: steps.resolve-pr.outputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.resolve-pr.outputs.pr_number }}
+          TRACE_ID: ${{ steps.bench.outputs.trace_id }}
+          TRACE_JSON: ${{ steps.bench.outputs.trace_json }}
+          SCREENSHOT_PNG: ${{ steps.bench.outputs.screenshot_png }}
+          SUMMARY_JSON: ${{ steps.bench.outputs.summary_json }}
+          REPORT_MD: ${{ steps.bench.outputs.report_md }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          marker="<!-- jaeger-spotbugs-benchmark -->"
+          comment_md="target/bench/pr-comment.md"
+          {
+            echo "${marker}"
+            echo "## Jaeger SpotBugs Benchmark"
+            echo
+            cat "${REPORT_MD}"
+            echo
+            echo "- Trace JSON: \`${TRACE_JSON}\`"
+            echo "- Summary JSON: \`${SUMMARY_JSON}\`"
+            echo "- Screenshot: \`${SCREENSHOT_PNG}\`"
+            echo "- Workflow artifacts: [Run ${GITHUB_RUN_ID}](${run_url})"
+          } > "${comment_md}"
+
+          comment_json="target/bench/pr-comment.json"
+          jq -n --rawfile body "${comment_md}" '{body: $body}' > "${comment_json}"
+
+          existing_comment_id="$(
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate \
+              --jq '.[] | select(.body | contains("<!-- jaeger-spotbugs-benchmark -->")) | .id' \
+              | tail -n 1
+          )"
+
+          if [[ -n "${existing_comment_id}" ]]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing_comment_id}" \
+              --input "${comment_json}" >/dev/null
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              --input "${comment_json}" >/dev/null
+          fi
+      - name: Upload trace and screenshot to GitHub Release
+        if: needs.release-please.outputs.rust_release_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release-please.outputs.rust_tag_name }}
+          TRACE_JSON: ${{ steps.bench.outputs.trace_json }}
+          SUMMARY_JSON: ${{ steps.bench.outputs.summary_json }}
+          SCREENSHOT_PNG: ${{ steps.bench.outputs.screenshot_png }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "${TAG_NAME}" "${TRACE_JSON}" "${SUMMARY_JSON}" "${SCREENSHOT_PNG}" --clobber
+
   publish-rust-github-release:
     runs-on: ubuntu-latest
     needs:
       - release-please
       - build-release-binaries
+      - benchmark-release-jaeger
     if: needs.release-please.outputs.rust_release_created == 'true'
     permissions:
       contents: write
