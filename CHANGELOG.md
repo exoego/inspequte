@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.17.0](https://github.com/KengoTODA/inspequte/compare/inspequte-v0.16.0...inspequte-v0.17.0) (2026-02-13)
+
+
+### Features
+
+* **dataflow:** migrate iterative JVM rules to worklist engine ([4099ca9](https://github.com/KengoTODA/inspequte/commit/4099ca927080ccbb292bc1789950f46e0d2a0eec))
+* **prompts:** add no-go rule resume skill ([0f5eee3](https://github.com/KengoTODA/inspequte/commit/0f5eee3e5ca359045af0788be235a9398dbad5ad))
+* **rules:** reimplement exception_cause_not_preserved ([8e7893a](https://github.com/KengoTODA/inspequte/commit/8e7893a4ea5daadbc2353f99dc9bdf7a2f46517d))
+* **rules:** resume return_in_finally implementation ([4efe262](https://github.com/KengoTODA/inspequte/commit/4efe26288e668d3a6859af59b64128772d4655ab))
+
+
+### Bug Fixes
+
+* **rule:** reduce exception-cause analysis blowups ([a752374](https://github.com/KengoTODA/inspequte/commit/a7523744ea0b40b91e3bfcb4b2cb60b155d1305d))
+* **rules:** stabilize exception cause state exploration ([8205033](https://github.com/KengoTODA/inspequte/commit/8205033ea86ffd40a661e41fd8b2f61e0e9cc355))
+
 ## [0.16.0](https://github.com/KengoTODA/inspequte/compare/inspequte-v0.15.1...inspequte-v0.16.0) (2026-02-11)
 
 
