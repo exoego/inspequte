@@ -215,6 +215,13 @@
               "shortDescription": {
                 "text": "SLF4J varargs calls with unknown argument arrays"
               }
+            },
+            {
+              "id": "STRING_CASE_WITHOUT_LOCALE",
+              "name": "String case conversion without explicit locale",
+              "shortDescription": {
+                "text": "String.toLowerCase()/toUpperCase() calls without Locale argument"
+              }
             }
           ],
           "semanticVersion": "0.0.0"
