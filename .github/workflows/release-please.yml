@@ -5,6 +5,11 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
 jobs:
   release-please:
     runs-on: ubuntu-latest
@@ -174,6 +179,11 @@ jobs:
     outputs:
       rust_pr_number: ${{ steps.resolve-pr.outputs.pr_number }}
     steps:
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.PRIVATE_KEY }}
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       - name: Install Rust
@@ -266,6 +276,7 @@ jobs:
         id: resolve-pr
         if: needs.release-please.outputs.prs_created == 'true'
         env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PRS_JSON: ${{ needs.release-please.outputs.prs }}
         shell: bash
         run: |
@@ -275,14 +286,57 @@ jobs:
               | jq -r 'if type == "array" then (.[0].number // empty) elif type == "object" then (.number // empty) else empty end'
           )"
           echo "pr_number=${pr_number}" >> "${GITHUB_OUTPUT}"
+      - name: Publish screenshot for PR comment
+        id: screenshot-image
+        if: steps.resolve-pr.outputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ASSET_BRANCH: codex/benchmark-screenshots
+          SCREENSHOT_PNG: ${{ steps.bench.outputs.screenshot_png }}
+          TRACE_ID: ${{ steps.bench.outputs.trace_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          work_dir="$(mktemp -d)"
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "${work_dir}"
+
+          pushd "${work_dir}" >/dev/null
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin "${ASSET_BRANCH}" >/dev/null 2>&1 || true
+          if git show-ref --verify --quiet "refs/remotes/origin/${ASSET_BRANCH}"; then
+            git checkout -B "${ASSET_BRANCH}" "origin/${ASSET_BRANCH}"
+          else
+            git checkout -B "${ASSET_BRANCH}"
+          fi
+
+          screenshot_name="jaeger-trace-${TRACE_ID}-run${GITHUB_RUN_ID}.png"
+          asset_path=".github/benchmark-assets/${screenshot_name}"
+          mkdir -p "$(dirname "${asset_path}")"
+          cp "${SCREENSHOT_PNG}" "${asset_path}"
+
+          git add "${asset_path}"
+          if git diff --cached --quiet; then
+            echo "Screenshot image is unchanged."
+          else
+            git commit -m "chore(ci): add benchmark screenshot for run ${GITHUB_RUN_ID}"
+            git push -u origin "${ASSET_BRANCH}"
+          fi
+          popd >/dev/null
+
+          screenshot_image_url="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${ASSET_BRANCH}/${asset_path}"
+          echo "screenshot_image_url=${screenshot_image_url}" >> "${GITHUB_OUTPUT}"
       - name: Post benchmark report to release PR
         if: steps.resolve-pr.outputs.pr_number != ''
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.resolve-pr.outputs.pr_number }}
           TRACE_ID: ${{ steps.bench.outputs.trace_id }}
           TRACE_JSON: ${{ steps.bench.outputs.trace_json }}
           SCREENSHOT_PNG: ${{ steps.bench.outputs.screenshot_png }}
+          SCREENSHOT_IMAGE_URL: ${{ steps.screenshot-image.outputs.screenshot_image_url }}
           SUMMARY_JSON: ${{ steps.bench.outputs.summary_json }}
           REPORT_MD: ${{ steps.bench.outputs.report_md }}
         shell: bash
@@ -300,7 +354,10 @@ jobs:
             echo "- Trace JSON: \`${TRACE_JSON}\`"
             echo "- Summary JSON: \`${SUMMARY_JSON}\`"
             echo "- Screenshot: \`${SCREENSHOT_PNG}\`"
+            echo "- Screenshot URL: ${SCREENSHOT_IMAGE_URL}"
             echo "- Workflow artifacts: [Run ${GITHUB_RUN_ID}](${run_url})"
+            echo
+            echo "![Jaeger trace screenshot](${SCREENSHOT_IMAGE_URL})"
           } > "${comment_md}"
 
           comment_json="target/bench/pr-comment.json"
