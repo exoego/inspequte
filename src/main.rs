@@ -497,7 +497,7 @@ fn should_validate_sarif() -> bool {
 }
 
 fn validate_sarif(sarif: &Sarif) -> Result<()> {
-    let schema = serde_json::from_str(include_str!("../assets/sarif-2.1.0.json"))
+    let schema = serde_json::from_str(include_str!("assets/sarif-2.1.0.json"))
         .context("load SARIF schema")?;
     let compiled = JSONSchema::compile(&schema)
         .map_err(|err| anyhow::anyhow!("compile SARIF schema: {err}"))?;
