@@ -16,10 +16,9 @@ env:
 jobs:
   authoring:
     runs-on: ubuntu-latest
-    environment: claude
-    timeout-minutes: 60
     permissions:
       contents: read
+      id-token: write
     outputs:
       rule_id: ${{ steps.meta.outputs.rule_id }}
       rule_idea: ${{ steps.meta.outputs.rule_idea }}
@@ -82,12 +81,22 @@ jobs:
           recommendation: <Go|No-Go>
           PROMPT
 
+      - name: Load orchestration prompt
+        id: prompt
+        shell: bash
+        run: |
+          {
+            echo "prompt<<'EOF'"
+            cat target/opus-workflow/prompts/authoring-rule-opus.md
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Run Claude (Opus)
         uses: anthropics/claude-code-action@beta
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           model: claude-opus-4-1-20250805
-          prompt_file: target/opus-workflow/prompts/authoring-rule-opus.md
+          direct_prompt: ${{ steps.prompt.outputs.prompt }}
         env:
           BASE_REF: ${{ env.BASE_REF }}
 
