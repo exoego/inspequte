@@ -98,7 +98,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_CLAUDE_KEY }}
           prompt: ${{ steps.prompt.outputs.prompt }}
-          claude_args: "--model claude-opus-4-6-20250918"
+          claude_args: "--model claude-opus-4-5-20251101"
         env:
           BASE_REF: ${{ env.BASE_REF }}
 
