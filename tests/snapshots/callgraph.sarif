@@ -42,6 +42,13 @@
               }
             },
             {
+              "id": "BIGDECIMAL_FROM_DOUBLE",
+              "name": "BigDecimal from double",
+              "shortDescription": {
+                "text": "BigDecimal constructors with double can introduce precision surprises"
+              }
+            },
+            {
               "id": "EMPTY_CATCH",
               "name": "Empty catch block",
               "shortDescription": {
