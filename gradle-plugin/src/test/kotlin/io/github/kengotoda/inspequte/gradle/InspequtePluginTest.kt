@@ -81,12 +81,12 @@ class InspequtePluginTest {
         extension.otel.set("http://localhost:8080")
         val task = project.tasks.getByName(mainInspequteTaskName(project)) as InspequteTask
 
-        task.setInspequteOtel("http://localhost:4318/v1/traces")
+        task.setInspequteOtel("http://localhost:4318/")
         val args = task.argumentProviders.flatMap { it.asArguments() }
 
-        assertEquals("http://localhost:4318/v1/traces", task.otel.get())
+        assertEquals("http://localhost:4318/", task.otel.get())
         assertTrue(args.windowed(size = 2, step = 1).any {
-            it[0] == "--otel" && it[1] == "http://localhost:4318/v1/traces"
+            it[0] == "--otel" && it[1] == "http://localhost:4318/"
         })
     }
 
@@ -96,7 +96,7 @@ class InspequtePluginTest {
         project.plugins.apply("java")
         project.plugins.apply(InspequtePlugin::class.java)
         val extension = project.extensions.getByType(InspequteExtension::class.java)
-        extension.otel.set("localhost:4318/v1/traces")
+        extension.otel.set("localhost:4318/")
         val task = project.tasks.getByName(mainInspequteTaskName(project)) as InspequteTask
 
         val exception = assertThrows(IllegalArgumentException::class.java) {

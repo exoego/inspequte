@@ -48,7 +48,7 @@ class InspequteArgumentProvider(
     private fun invalidOtelUrl(url: String): IllegalArgumentException {
         return IllegalArgumentException(
             "Invalid OpenTelemetry collector URL '$url'. " +
-                "Expected absolute http(s) URL, e.g. http://localhost:4318/v1/traces."
+                "Expected absolute http(s) URL, e.g. http://localhost:4318/."
         )
     }
 }

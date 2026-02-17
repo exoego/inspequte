@@ -15,4 +15,4 @@ fi
 
 echo "jaeger ui: http://localhost:16686"
 echo "otlp grpc: localhost:4317"
-echo "otlp http: http://localhost:4318/v1/traces"
+echo "otlp http: http://localhost:4318/"

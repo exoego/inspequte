@@ -1,8 +1,10 @@
 use crate::dataflow::stack_machine::StackMachine;
 use crate::ir::Method;
 use crate::opcodes;
+use opentelemetry::KeyValue;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
+use tracing::info;
 
 /// Rule-supplied value constructors used by shared opcode semantics.
 pub(crate) trait ValueDomain<V> {
@@ -50,6 +52,7 @@ impl SemanticsCoverage {
     }
 
     /// Returns how often a specific opcode was overridden by a hook.
+    #[cfg(test)]
     pub(crate) fn hook_override_count(&self, opcode: u8) -> usize {
         self.overridden_opcodes.get(&opcode).copied().unwrap_or(0)
     }
@@ -112,7 +115,7 @@ pub(crate) fn apply_semantics<V, D, H>(
     domain: &D,
     hooks: &mut H,
     coverage: &mut SemanticsCoverage,
-    debug: SemanticsDebugConfig,
+    debug_config: SemanticsDebugConfig,
 ) -> ApplyOutcome
 where
     V: Clone,
@@ -121,10 +124,10 @@ where
 {
     if hooks.pre_apply(machine, method, offset, opcode) == ApplyOutcome::Applied {
         coverage.record_hook_override(opcode);
-        if debug.enabled {
-            eprintln!(
+        if debug_config.enabled {
+            info!(
                 "opcode_semantics debug: rule={} offset={} opcode=0x{:02x} event=hook_override",
-                debug.rule_id, offset, opcode
+                debug_config.rule_id, offset, opcode
             );
         }
         hooks.post_apply(machine, method, offset, opcode, ApplyOutcome::Applied);
@@ -137,10 +140,10 @@ where
         ApplyOutcome::Applied
     } else {
         coverage.record_fallback(opcode);
-        if debug.enabled {
-            eprintln!(
+        if debug_config.enabled {
+            info!(
                 "opcode_semantics debug: rule={} offset={} opcode=0x{:02x} event=fallback",
-                debug.rule_id, offset, opcode
+                debug_config.rule_id, offset, opcode
             );
         }
         ApplyOutcome::NotHandled
@@ -185,6 +188,33 @@ pub(crate) fn opcode_semantics_debug_enabled() -> bool {
             .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
             .unwrap_or(false)
     })
+}
+
+/// Emits one summary event for opcode semantics fallback/debug counters.
+pub(crate) fn emit_opcode_semantics_summary_event(rule_id: &str, coverage: &SemanticsCoverage) {
+    let invoke_fallbacks = coverage.fallback_count(opcodes::INVOKEVIRTUAL)
+        + coverage.fallback_count(opcodes::INVOKESPECIAL)
+        + coverage.fallback_count(opcodes::INVOKESTATIC)
+        + coverage.fallback_count(opcodes::INVOKEINTERFACE)
+        + coverage.fallback_count(opcodes::INVOKEDYNAMIC);
+    let attributes = [
+        KeyValue::new("inspequte.rule_id", rule_id.to_string()),
+        KeyValue::new("inspequte.debug_summary", "opcode_semantics"),
+        KeyValue::new(
+            "inspequte.fallback_count",
+            coverage.fallback_not_handled as i64,
+        ),
+        KeyValue::new(
+            "inspequte.default_apply_count",
+            coverage.applied_by_default as i64,
+        ),
+        KeyValue::new(
+            "inspequte.hook_apply_count",
+            coverage.applied_by_hook as i64,
+        ),
+        KeyValue::new("inspequte.invoke_fallback_count", invoke_fallbacks as i64),
+    ];
+    crate::telemetry::add_current_span_event("inspequte.debug.summary", &attributes);
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]

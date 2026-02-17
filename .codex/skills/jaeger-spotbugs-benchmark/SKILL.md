@@ -9,7 +9,7 @@ description: Launch Jaeger, run SpotBugs benchmark traces, capture Jaeger UI scr
 - Repository root with `scripts/bench-spotbugs.sh`.
 - Docker available locally.
 - Jaeger UI reachable at `http://localhost:16686`.
-- OTLP HTTP endpoint `http://localhost:4318/v1/traces`.
+- OTLP HTTP endpoint `http://localhost:4318/`.
 - Execute all commands from repository root.
 
 ## Outputs

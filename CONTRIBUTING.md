@@ -23,8 +23,8 @@ We follow Conventional Commits 1.0.0. Examples:
 
 ### OpenTelemetry traces
 Use `--otel <url>` to send OTLP traces over HTTP to a collector:
-- `inspequte --input path/to.jar --otel http://localhost:4318/v1/traces`
-- `inspequte baseline --input path/to.jar --otel http://localhost:4318/v1/traces`
+- `inspequte --input path/to.jar --otel http://localhost:4318/`
+- `inspequte baseline --input path/to.jar --otel http://localhost:4318/`
 
 The spans include attributes like `inspequte.rule_id`, `inspequte.class`, and
 `inspequte.jar_path`/`inspequte.jar_entry` to help isolate slow rules. Use a

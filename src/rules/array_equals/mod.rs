@@ -8,7 +8,7 @@ use serde_sarif::sarif::Result as SarifResult;
 
 use crate::dataflow::opcode_semantics::{
     ApplyOutcome, SemanticsCoverage, SemanticsDebugConfig, SemanticsHooks, ValueDomain,
-    apply_semantics, opcode_semantics_debug_enabled,
+    apply_semantics, emit_opcode_semantics_summary_event, opcode_semantics_debug_enabled,
 };
 use crate::dataflow::stack_machine::StackMachine;
 use crate::engine::AnalysisContext;
@@ -33,6 +33,8 @@ impl Rule for ArrayEqualsRule {
 
     fn run(&self, context: &AnalysisContext) -> Result<Vec<SarifResult>> {
         let mut results = Vec::new();
+        let debug_enabled = opcode_semantics_debug_enabled();
+        let mut rule_coverage = SemanticsCoverage::default();
         for class in &context.classes {
             if !context.is_analysis_target_class(class) {
                 continue;
@@ -49,15 +51,17 @@ impl Rule for ArrayEqualsRule {
                         if method.bytecode.is_empty() {
                             continue;
                         }
-                        class_results.extend(analyze_method(
-                            &class.name,
-                            method,
-                            artifact_uri.as_deref(),
-                        )?);
+                        let analysis =
+                            analyze_method(&class.name, method, artifact_uri.as_deref())?;
+                        rule_coverage.merge_from(&analysis.coverage);
+                        class_results.extend(analysis.results);
                     }
                     Ok(class_results)
                 })?;
             results.extend(class_results);
+        }
+        if debug_enabled && rule_coverage.fallback_not_handled > 0 {
+            emit_opcode_semantics_summary_event("ARRAY_EQUALS", &rule_coverage);
         }
         Ok(results)
     }
@@ -161,7 +165,7 @@ fn analyze_method(
     class_name: &str,
     method: &Method,
     artifact_uri: Option<&str>,
-) -> Result<Vec<SarifResult>> {
+) -> Result<MethodAnalysis> {
     let mut results = Vec::new();
     let mut next_call_index = 0usize;
     let mut descriptor_cache = HashMap::new();
@@ -266,25 +270,13 @@ fn analyze_method(
         offset += length;
     }
 
-    if debug.enabled && coverage.fallback_not_handled > 0 {
-        let invoke_fallbacks = coverage.fallback_count(opcodes::INVOKEVIRTUAL)
-            + coverage.fallback_count(opcodes::INVOKESPECIAL)
-            + coverage.fallback_count(opcodes::INVOKESTATIC)
-            + coverage.fallback_count(opcodes::INVOKEINTERFACE);
-        eprintln!(
-            "opcode_semantics debug: rule=ARRAY_EQUALS method={}{} default={} hook={} fallback={} if_acmp_hook={} invoke_fallback={}",
-            method.name,
-            method.descriptor,
-            coverage.applied_by_default,
-            coverage.applied_by_hook,
-            coverage.fallback_not_handled,
-            coverage.hook_override_count(opcodes::IF_ACMPEQ)
-                + coverage.hook_override_count(opcodes::IF_ACMPNE),
-            invoke_fallbacks
-        );
-    }
+    Ok(MethodAnalysis { results, coverage })
+}
 
-    Ok(results)
+/// Method-level analysis output with coverage summary for debug telemetry events.
+struct MethodAnalysis {
+    results: Vec<SarifResult>,
+    coverage: SemanticsCoverage,
 }
 
 fn callsite_for_offset<'a>(

@@ -29,12 +29,13 @@ use serde_sarif::sarif::{
     Artifact, Invocation, PropertyBag, ReportingDescriptor, Run, SCHEMA_URL, Sarif, Tool,
     ToolComponent,
 };
+use tracing::error;
 
 use crate::baseline::{load_baseline, write_baseline};
 use crate::classpath::resolve_classpath;
 use crate::engine::{Engine, build_context_with_timings};
 use crate::scan::scan_inputs;
-use crate::telemetry::{Telemetry, with_span};
+use crate::telemetry::{Telemetry, init_logging, with_span};
 
 const DEFAULT_BASELINE_PATH: &str = ".inspequte/baseline.json";
 
@@ -60,7 +61,11 @@ struct ScanArgs {
     input: InputArgs,
     #[arg(long, value_name = "PATH")]
     output: Option<PathBuf>,
-    #[arg(long, value_name = "URL")]
+    #[arg(
+        long,
+        value_name = "URL",
+        help = "OTLP HTTP collector URL (recommended: http://localhost:4318/)."
+    )]
     otel: Option<String>,
     #[arg(long, value_name = "PATH", default_value = DEFAULT_BASELINE_PATH)]
     baseline: PathBuf,
@@ -107,7 +112,11 @@ struct BaselineArgs {
     input: InputArgs,
     #[arg(long, value_name = "PATH", default_value = DEFAULT_BASELINE_PATH)]
     output: PathBuf,
-    #[arg(long, value_name = "URL")]
+    #[arg(
+        long,
+        value_name = "URL",
+        help = "OTLP HTTP collector URL (recommended: http://localhost:4318/)."
+    )]
     otel: Option<String>,
 }
 
@@ -136,6 +145,7 @@ fn run_scan(args: ScanArgs) -> Result<()> {
         Some(url) => Some(Arc::new(Telemetry::new(url.clone())?)),
         None => None,
     };
+    init_logging();
     let result = with_span(telemetry.as_deref(), "execution", &[], || {
         let mut analysis = analyze(&expanded.input, &expanded.classpath, telemetry.clone())?;
         let analysis_ref = &mut analysis;
@@ -192,7 +202,7 @@ fn run_scan(args: ScanArgs) -> Result<()> {
 
     if let Some(telemetry) = telemetry {
         if let Err(err) = telemetry.shutdown() {
-            eprintln!("telemetry shutdown failed: {err}");
+            error!("telemetry shutdown failed: {err}");
         }
     }
 
@@ -205,6 +215,7 @@ fn run_baseline(args: BaselineArgs) -> Result<()> {
         Some(url) => Some(Arc::new(Telemetry::new(url.clone())?)),
         None => None,
     };
+    init_logging();
     let result = with_span(telemetry.as_deref(), "execution", &[], || -> Result<()> {
         let analysis = analyze(&expanded.input, &expanded.classpath, telemetry.clone())?;
         write_baseline(&args.output, &analysis.results)?;
@@ -212,7 +223,7 @@ fn run_baseline(args: BaselineArgs) -> Result<()> {
     });
     if let Some(telemetry) = telemetry {
         if let Err(err) = telemetry.shutdown() {
-            eprintln!("telemetry shutdown failed: {err}");
+            error!("telemetry shutdown failed: {err}");
         }
     }
     result

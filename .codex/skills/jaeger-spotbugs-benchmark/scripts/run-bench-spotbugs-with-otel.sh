@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repeat="${1:-1}"
-export OTEL_ENDPOINT="${OTEL_ENDPOINT:-http://localhost:4318/v1/traces}"
+export OTEL_ENDPOINT="${OTEL_ENDPOINT:-http://localhost:4318/}"
 
 if [ ! -x "scripts/bench-spotbugs.sh" ]; then
   echo "scripts/bench-spotbugs.sh not found; run this command from repository root" >&2

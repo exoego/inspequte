@@ -159,7 +159,7 @@ plugins {
 
 inspequte {
     // Optional: forward OTLP collector URL to inspequte via --otel
-    otel.set("http://localhost:4318/v1/traces")
+    otel.set("http://localhost:4318/")
 }
 
 // Registered automatically:

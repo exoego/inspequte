@@ -8,7 +8,7 @@ use serde_sarif::sarif::Result as SarifResult;
 
 use crate::dataflow::opcode_semantics::{
     ApplyOutcome, SemanticsCoverage, SemanticsDebugConfig, SemanticsHooks, ValueDomain,
-    apply_semantics, opcode_semantics_debug_enabled,
+    apply_semantics, emit_opcode_semantics_summary_event, opcode_semantics_debug_enabled,
 };
 use crate::dataflow::stack_machine::{StackMachine, StackMachineConfig};
 use crate::dataflow::worklist::{
@@ -40,6 +40,8 @@ impl Rule for ExceptionCauseNotPreservedRule {
 
     fn run(&self, context: &AnalysisContext) -> Result<Vec<SarifResult>> {
         let mut results = Vec::new();
+        let debug_enabled = opcode_semantics_debug_enabled();
+        let mut rule_coverage = SemanticsCoverage::default();
         for class in &context.classes {
             if !context.is_analysis_target_class(class) {
                 continue;
@@ -60,7 +62,9 @@ impl Rule for ExceptionCauseNotPreservedRule {
 
                         let mut seen_findings = BTreeSet::new();
                         for handler_pc in handler_offsets(method) {
-                            for throw_offset in analyze_handler(method, handler_pc)? {
+                            let analysis = analyze_handler(method, handler_pc)?;
+                            rule_coverage.merge_from(&analysis.coverage);
+                            for throw_offset in analysis.findings {
                                 if !seen_findings.insert((handler_pc, throw_offset)) {
                                     continue;
                                 }
@@ -89,6 +93,9 @@ impl Rule for ExceptionCauseNotPreservedRule {
                     Ok(class_results)
                 })?;
             results.extend(class_results);
+        }
+        if debug_enabled && rule_coverage.fallback_not_handled > 0 {
+            emit_opcode_semantics_summary_event("EXCEPTION_CAUSE_NOT_PRESERVED", &rule_coverage);
         }
         Ok(results)
     }
@@ -257,33 +264,24 @@ fn handler_offsets(method: &Method) -> Vec<u32> {
     offsets.into_iter().collect()
 }
 
-fn analyze_handler(method: &Method, handler_pc: u32) -> Result<Vec<u32>> {
+fn analyze_handler(method: &Method, handler_pc: u32) -> Result<HandlerAnalysis> {
     let semantics = HandlerSemantics::new(handler_pc);
     let findings = analyze_method(method, &semantics)?;
     let coverage = semantics.coverage_snapshot();
-    if semantics.opcode_debug_enabled && coverage.fallback_not_handled > 0 {
-        let invoke_fallbacks = coverage.fallback_count(opcodes::INVOKEVIRTUAL)
-            + coverage.fallback_count(opcodes::INVOKESPECIAL)
-            + coverage.fallback_count(opcodes::INVOKESTATIC)
-            + coverage.fallback_count(opcodes::INVOKEINTERFACE)
-            + coverage.fallback_count(opcodes::INVOKEDYNAMIC);
-        eprintln!(
-            "opcode_semantics debug: rule=EXCEPTION_CAUSE_NOT_PRESERVED method={}{} handler_pc={} default={} hook={} fallback={} new_hook={} invoke_fallback={}",
-            method.name,
-            method.descriptor,
-            handler_pc,
-            coverage.applied_by_default,
-            coverage.applied_by_hook,
-            coverage.fallback_not_handled,
-            coverage.hook_override_count(opcodes::NEW),
-            invoke_fallbacks
-        );
-    }
-    Ok(findings
-        .into_iter()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect())
+    Ok(HandlerAnalysis {
+        findings: findings
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+        coverage,
+    })
+}
+
+/// Handler-level analysis output with coverage summary for debug telemetry events.
+struct HandlerAnalysis {
+    findings: Vec<u32>,
+    coverage: SemanticsCoverage,
 }
 
 fn initial_machine() -> StackMachine<Value> {
@@ -457,7 +455,7 @@ fn dump_stack_depth(
         return;
     }
 
-    eprintln!(
+    tracing::info!(
         "exception_cause_not_preserved debug: stack depth reached limit method={}{} handler_pc={} offset={} opcode=0x{:02x} depth={} top={:?}",
         method.name,
         method.descriptor,

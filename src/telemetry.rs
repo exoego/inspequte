@@ -9,6 +9,10 @@ use opentelemetry_sdk::trace::{BatchConfigBuilder, BatchSpanProcessor, Config, T
 use std::sync::Once;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+use tracing::error;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 /// Telemetry handle for OpenTelemetry tracing.
 pub(crate) struct Telemetry {
@@ -20,7 +24,7 @@ pub(crate) struct Telemetry {
 impl Telemetry {
     /// Initialize telemetry with an OTLP HTTP exporter.
     pub(crate) fn new(endpoint: String) -> Result<Self> {
-        let endpoint = normalize_otlp_http_endpoint(&endpoint)?;
+        let endpoint = normalize_otlp_http_trace_endpoint(&endpoint)?;
         let exporter = SpanExporterBuilder::from(
             opentelemetry_otlp::new_exporter()
                 .http()
@@ -74,7 +78,10 @@ impl Telemetry {
         Ok(())
     }
 
-    fn from_exporter<E: SpanExporter + 'static>(exporter: E) -> Result<Self> {
+    fn from_exporter<E: SpanExporter + 'static>(exporter: E) -> Result<Self>
+    where
+        E: SpanExporter + 'static,
+    {
         let resource_attributes = vec![KeyValue::new("service.name", "inspequte")];
         let resource = Resource::new(resource_attributes);
         install_error_handler();
@@ -108,12 +115,49 @@ impl Telemetry {
     }
 }
 
-fn normalize_otlp_http_endpoint(endpoint: &str) -> Result<String> {
+fn normalize_otlp_http_trace_endpoint(endpoint: &str) -> Result<String> {
     let mut url = reqwest::Url::parse(endpoint).context("parse OTLP endpoint")?;
-    if url.path() == "/" {
+    let path = url.path().to_string();
+    if path == "/" {
         url.set_path("/v1/traces");
+    } else if let Some(prefix) = path.strip_suffix("/v1/logs") {
+        url.set_path(&format!("{prefix}/v1/traces"));
     }
     Ok(url.to_string())
+}
+
+/// Initialize logging facade with stderr output.
+pub(crate) fn init_logging() {
+    let init_result = tracing_subscriber::registry()
+        .with(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("inspequte=info,warn")),
+        )
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .try_init();
+    let _ = init_result;
+}
+
+/// Add an OpenTelemetry event to the currently active span.
+pub(crate) fn add_current_span_event(name: &str, attributes: &[KeyValue]) {
+    let cx = OtelContext::current();
+    let span = cx.span();
+    if !span.span_context().is_valid() {
+        return;
+    }
+    span.add_event(name.to_string(), attributes.to_vec());
+}
+
+fn use_tracing_logging() -> bool {
+    tracing::dispatcher::has_been_set()
+}
+
+fn log_otel_error_once(message: &str) {
+    if use_tracing_logging() {
+        error!("OpenTelemetry export error occurred: {message}");
+    } else {
+        eprintln!("OpenTelemetry export error occurred: {message}");
+    }
 }
 
 fn install_error_handler() {
@@ -125,7 +169,7 @@ fn install_error_handler() {
             if LOGGED_ERROR.swap(true, Ordering::Relaxed) {
                 return;
             }
-            eprintln!("OpenTelemetry trace error occurred: {message}");
+            log_otel_error_once(&message);
         });
     });
 }
@@ -166,5 +210,19 @@ mod tests {
         let telemetry = Telemetry::from_exporter(NoopExporter).expect("telemetry");
         telemetry.in_span("test", &[KeyValue::new("test.key", "value")], || {});
         telemetry.shutdown().expect("shutdown");
+    }
+
+    #[test]
+    fn normalize_root_endpoint_to_trace_path() {
+        let endpoint =
+            normalize_otlp_http_trace_endpoint("http://localhost:4318/").expect("endpoint");
+        assert_eq!(endpoint, "http://localhost:4318/v1/traces");
+    }
+
+    #[test]
+    fn normalize_log_endpoint_to_trace_path() {
+        let endpoint =
+            normalize_otlp_http_trace_endpoint("http://localhost:4318/v1/logs").expect("endpoint");
+        assert_eq!(endpoint, "http://localhost:4318/v1/traces");
     }
 }
