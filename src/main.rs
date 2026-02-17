@@ -60,10 +60,6 @@ struct ScanArgs {
     input: InputArgs,
     #[arg(long, value_name = "PATH")]
     output: Option<PathBuf>,
-    #[arg(long)]
-    quiet: bool,
-    #[arg(long)]
-    timing: bool,
     #[arg(long, value_name = "URL")]
     otel: Option<String>,
     #[arg(long, value_name = "PATH", default_value = DEFAULT_BASELINE_PATH)]
@@ -140,10 +136,8 @@ fn run_scan(args: ScanArgs) -> Result<()> {
         Some(url) => Some(Arc::new(Telemetry::new(url.clone())?)),
         None => None,
     };
-    let started_at = Instant::now();
     let result = with_span(telemetry.as_deref(), "execution", &[], || {
         let mut analysis = analyze(&expanded.input, &expanded.classpath, telemetry.clone())?;
-        let baseline_started_at = Instant::now();
         let analysis_ref = &mut analysis;
         let baseline_result = with_span(
             telemetry.as_deref(),
@@ -158,13 +152,11 @@ fn run_scan(args: ScanArgs) -> Result<()> {
             },
         );
         baseline_result?;
-        let baseline_duration_ms = baseline_started_at.elapsed().as_millis();
-
-        let write_duration_ms = with_span(
+        with_span(
             telemetry.as_deref(),
             "sarif",
             &[KeyValue::new("inspequte.phase", "sarif")],
-            || -> Result<u128> {
+            || -> Result<()> {
                 let invocation = build_invocation(&analysis.invocation_stats);
                 let sarif = build_sarif(
                     telemetry.as_deref(),
@@ -176,7 +168,6 @@ fn run_scan(args: ScanArgs) -> Result<()> {
                 if should_validate_sarif() {
                     validate_sarif(&sarif)?;
                 }
-                let write_started_at = Instant::now();
                 let write_result = with_span(
                     telemetry.as_deref(),
                     "sarif.write",
@@ -192,34 +183,9 @@ fn run_scan(args: ScanArgs) -> Result<()> {
                     },
                 );
                 write_result?;
-                Ok(write_started_at.elapsed().as_millis())
+                Ok(())
             },
         )?;
-
-        if args.timing && !args.quiet {
-            eprintln!(
-                "timing: total_ms={} scan_ms={} classpath_ms={} analysis_callgraph_ms={} analysis_callgraph_hierarchy_ms={} analysis_callgraph_index_ms={} analysis_callgraph_edges_ms={} analysis_artifact_ms={} analysis_rules_ms={} baseline_ms={} write_ms={} (classes={} artifacts={})",
-                started_at.elapsed().as_millis(),
-                analysis.invocation_stats.scan_duration_ms,
-                analysis.invocation_stats.classpath_duration_ms,
-                analysis.invocation_stats.analysis_call_graph_duration_ms,
-                analysis
-                    .invocation_stats
-                    .analysis_call_graph_hierarchy_duration_ms,
-                analysis
-                    .invocation_stats
-                    .analysis_call_graph_index_duration_ms,
-                analysis
-                    .invocation_stats
-                    .analysis_call_graph_edges_duration_ms,
-                analysis.invocation_stats.analysis_artifact_duration_ms,
-                analysis.invocation_stats.analysis_rules_duration_ms,
-                baseline_duration_ms,
-                write_duration_ms,
-                analysis.invocation_stats.class_count,
-                analysis.invocation_stats.artifact_count
-            );
-        }
 
         Ok(())
     });

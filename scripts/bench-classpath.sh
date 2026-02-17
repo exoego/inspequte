@@ -36,17 +36,13 @@ cargo build >/dev/null
 echo "bench: input=${input} repeat=${repeat}" | tee -a "${log_file}"
 i=1
 while [ "${i}" -le "${repeat}" ]; do
-  tmp_log=$(mktemp)
-  input_name=$(basename "${input}" | tr -c 'A-Za-z0-9._-' '_')
   otel_args=""
   if [ -n "${otel_url}" ]; then
     otel_args="--otel ${otel_url}"
   fi
-  ./target/debug/inspequte --input "${input}" --timing ${otel_args} ${classpath_args} \
-    1>/dev/null 2>"${tmp_log}"
-  timing_line=$(tail -n 1 "${tmp_log}")
-  rm -f "${tmp_log}"
-  echo "run ${i}: ${timing_line}" | tee -a "${log_file}"
+  ./target/debug/inspequte --input "${input}" ${otel_args} ${classpath_args} \
+    1>/dev/null
+  echo "run ${i}: completed" | tee -a "${log_file}"
   i=$((i + 1))
 done
 

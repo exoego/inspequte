@@ -18,7 +18,7 @@ We follow Conventional Commits 1.0.0. Examples:
 - `INSPEQUTE_VALIDATE_SARIF=1` validates SARIF output against the bundled schema (dev only).
 
 ### Benchmarks
-- `scripts/bench-classpath.sh <input> [repeat] [classpath...]` captures timing baselines for a single input.
+- `scripts/bench-classpath.sh <input> [repeat] [classpath...]` runs benchmark scans for a single input.
 - `scripts/bench-spotbugs.sh [repeat]` benchmarks SpotBugs libraries (downloads if needed).
 
 ### OpenTelemetry traces

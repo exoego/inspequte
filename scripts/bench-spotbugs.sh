@@ -46,17 +46,13 @@ echo "bench: spotbugs_version=${spotbugs_version} repeat=${repeat}" | tee -a "${
 find "${lib_dir}" -type f -name "*.jar" | sort | while IFS= read -r jar_path; do
   i=1
   while [ "${i}" -le "${repeat}" ]; do
-    tmp_log=$(mktemp)
-    jar_name=$(basename "${jar_path}" | tr -c 'A-Za-z0-9._-' '_')
     otel_args=""
     if [ -n "${otel_url}" ]; then
       otel_args="--otel ${otel_url}"
     fi
-    ${validate_env} ./target/debug/inspequte --input "${jar_path}" --timing ${otel_args} \
-      1>/dev/null 2>"${tmp_log}"
-    timing_line=$(tail -n 1 "${tmp_log}")
-    rm -f "${tmp_log}"
-    echo "run ${i}: ${jar_path} ${timing_line}" | tee -a "${log_file}"
+    ${validate_env} ./target/debug/inspequte --input "${jar_path}" ${otel_args} \
+      1>/dev/null
+    echo "run ${i}: ${jar_path} completed" | tee -a "${log_file}"
     i=$((i + 1))
   done
 done
