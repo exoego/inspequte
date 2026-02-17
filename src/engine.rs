@@ -15,10 +15,9 @@ use crate::telemetry::{Telemetry, with_span};
 
 /// Inputs shared by analysis rules.
 pub(crate) struct AnalysisContext {
-    pub(crate) classes: Vec<Class>,
+    analysis_target_classes: Vec<Class>,
+    dependency_classes: Vec<Class>,
     artifact_uris: BTreeMap<i64, String>,
-    analysis_target_artifacts: BTreeSet<i64>,
-    artifact_parents: BTreeMap<i64, i64>,
     telemetry: Option<Arc<Telemetry>>,
     has_slf4j: bool,
     has_log4j2: bool,
@@ -127,6 +126,8 @@ pub(crate) fn build_context_with_timings(
         || analyze_artifacts(artifacts),
     );
     let (has_slf4j, has_log4j2) = detect_logging_frameworks(&classes, telemetry.as_deref());
+    let (analysis_target_classes, dependency_classes) =
+        partition_classes(classes, &analysis_target_artifacts, &artifact_parents);
     let artifact_duration_ms = artifact_started_at.elapsed().as_millis();
     let timings = ContextTimings {
         call_graph_duration_ms,
@@ -136,10 +137,9 @@ pub(crate) fn build_context_with_timings(
         call_graph_edges_duration_ms: 0,
     };
     let context = AnalysisContext {
-        classes,
+        analysis_target_classes,
+        dependency_classes,
         artifact_uris,
-        analysis_target_artifacts,
-        artifact_parents,
         telemetry,
         has_slf4j,
         has_log4j2,
@@ -160,6 +160,21 @@ fn rule_descriptor(metadata: &RuleMetadata) -> ReportingDescriptor {
 }
 
 impl AnalysisContext {
+    pub(crate) fn analysis_target_classes(&self) -> &[Class] {
+        &self.analysis_target_classes
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn dependency_classes(&self) -> &[Class] {
+        &self.dependency_classes
+    }
+
+    pub(crate) fn all_classes(&self) -> impl Iterator<Item = &Class> {
+        self.analysis_target_classes
+            .iter()
+            .chain(self.dependency_classes.iter())
+    }
+
     pub(crate) fn telemetry(&self) -> Option<&Telemetry> {
         self.telemetry.as_deref()
     }
@@ -169,20 +184,6 @@ impl AnalysisContext {
         F: FnOnce() -> T,
     {
         with_span(self.telemetry(), name, attributes, f)
-    }
-
-    pub(crate) fn is_analysis_target_class(&self, class: &Class) -> bool {
-        if self.analysis_target_artifacts.is_empty() {
-            return true;
-        }
-        let mut current = Some(class.artifact_index);
-        while let Some(index) = current {
-            if self.analysis_target_artifacts.contains(&index) {
-                return true;
-            }
-            current = self.artifact_parents.get(&index).copied();
-        }
-        false
     }
 
     pub(crate) fn artifact_uri(&self, index: i64) -> Option<&str> {
@@ -318,4 +319,153 @@ fn analyze_artifacts(
         }
     }
     (analysis_targets, parents, uris)
+}
+
+fn partition_classes(
+    classes: Vec<Class>,
+    analysis_target_artifacts: &BTreeSet<i64>,
+    artifact_parents: &BTreeMap<i64, i64>,
+) -> (Vec<Class>, Vec<Class>) {
+    if analysis_target_artifacts.is_empty() {
+        return (classes, Vec::new());
+    }
+
+    let mut analysis_target_classes = Vec::new();
+    let mut dependency_classes = Vec::new();
+    for class in classes {
+        if is_analysis_target_artifact(
+            class.artifact_index,
+            analysis_target_artifacts,
+            artifact_parents,
+        ) {
+            analysis_target_classes.push(class);
+        } else {
+            dependency_classes.push(class);
+        }
+    }
+
+    (analysis_target_classes, dependency_classes)
+}
+
+fn is_analysis_target_artifact(
+    artifact_index: i64,
+    analysis_target_artifacts: &BTreeSet<i64>,
+    artifact_parents: &BTreeMap<i64, i64>,
+) -> bool {
+    let mut current = Some(artifact_index);
+    while let Some(index) = current {
+        if analysis_target_artifacts.contains(&index) {
+            return true;
+        }
+        current = artifact_parents.get(&index).copied();
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+    use serde_sarif::sarif::{ArtifactLocation, ArtifactRoles};
+
+    use super::*;
+
+    fn class_with_artifact(name: &str, artifact_index: i64) -> Class {
+        Class {
+            name: name.to_string(),
+            super_name: None,
+            interfaces: Vec::new(),
+            type_parameters: Vec::new(),
+            referenced_classes: Vec::new(),
+            fields: Vec::new(),
+            methods: Vec::new(),
+            artifact_index,
+            is_record: false,
+        }
+    }
+
+    #[test]
+    fn build_context_partitions_analysis_target_and_dependency_classes() {
+        let classes = vec![
+            class_with_artifact("com/example/ClassA", 0),
+            class_with_artifact("com/example/ClassB", 1),
+            class_with_artifact("com/example/ClassC", 2),
+        ];
+        let artifacts = vec![
+            Artifact::builder()
+                .location(
+                    ArtifactLocation::builder()
+                        .uri("file:///tmp/app.jar".to_string())
+                        .build(),
+                )
+                .roles(vec![json!(ArtifactRoles::AnalysisTarget)])
+                .build(),
+            Artifact::builder()
+                .location(
+                    ArtifactLocation::builder()
+                        .uri("file:///tmp/lib.jar".to_string())
+                        .build(),
+                )
+                .build(),
+            Artifact::builder()
+                .location(
+                    ArtifactLocation::builder()
+                        .uri("jar:file:///tmp/app.jar!/lib/nested.jar".to_string())
+                        .build(),
+                )
+                .parent_index(0)
+                .build(),
+        ];
+
+        let context = build_context(classes, &artifacts);
+        let analysis_target_names = context
+            .analysis_target_classes()
+            .iter()
+            .map(|class| class.name.as_str())
+            .collect::<Vec<_>>();
+        let dependency_names = context
+            .dependency_classes()
+            .iter()
+            .map(|class| class.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            analysis_target_names,
+            vec!["com/example/ClassA", "com/example/ClassC"]
+        );
+        assert_eq!(dependency_names, vec!["com/example/ClassB"]);
+    }
+
+    #[test]
+    fn build_context_treats_all_classes_as_targets_without_analysis_target_artifacts() {
+        let classes = vec![
+            class_with_artifact("com/example/ClassA", 0),
+            class_with_artifact("com/example/ClassB", 1),
+        ];
+        let artifacts = vec![
+            Artifact::builder()
+                .location(
+                    ArtifactLocation::builder()
+                        .uri("file:///tmp/app.jar".to_string())
+                        .build(),
+                )
+                .build(),
+            Artifact::builder()
+                .location(
+                    ArtifactLocation::builder()
+                        .uri("file:///tmp/lib.jar".to_string())
+                        .build(),
+                )
+                .build(),
+        ];
+
+        let context = build_context(classes, &artifacts);
+        let all_names = context
+            .all_classes()
+            .map(|class| class.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(context.analysis_target_classes().len(), 2);
+        assert!(context.dependency_classes().is_empty());
+        assert_eq!(all_names, vec!["com/example/ClassA", "com/example/ClassB"]);
+    }
 }

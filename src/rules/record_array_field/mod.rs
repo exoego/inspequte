@@ -22,8 +22,8 @@ impl Rule for RecordArrayFieldRule {
 
     fn run(&self, context: &AnalysisContext) -> Result<Vec<SarifResult>> {
         let mut results = Vec::new();
-        for class in &context.classes {
-            if !context.is_analysis_target_class(class) || !class.is_record {
+        for class in context.analysis_target_classes() {
+            if !class.is_record {
                 continue;
             }
             let mut attributes = vec![KeyValue::new("inspequte.class", class.name.clone())];

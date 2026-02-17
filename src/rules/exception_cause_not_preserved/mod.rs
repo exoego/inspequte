@@ -42,11 +42,7 @@ impl Rule for ExceptionCauseNotPreservedRule {
         let mut results = Vec::new();
         let debug_enabled = opcode_semantics_debug_enabled();
         let mut rule_coverage = SemanticsCoverage::default();
-        for class in &context.classes {
-            if !context.is_analysis_target_class(class) {
-                continue;
-            }
-
+        for class in context.analysis_target_classes() {
             let mut attributes = vec![KeyValue::new("inspequte.class", class.name.clone())];
             if let Some(uri) = context.class_artifact_uri(class) {
                 attributes.push(KeyValue::new("inspequte.artifact_uri", uri));

@@ -41,10 +41,7 @@ impl Rule for PreferEnumSetRule {
         }
 
         let mut results = Vec::new();
-        for class in &context.classes {
-            if !context.is_analysis_target_class(class) {
-                continue;
-            }
+        for class in context.analysis_target_classes() {
             let local_variable_entries: usize = class
                 .methods
                 .iter()
@@ -338,8 +335,7 @@ impl<'a> SignatureParser<'a> {
 
 fn identify_enum_types(context: &AnalysisContext) -> BTreeSet<String> {
     context
-        .classes
-        .iter()
+        .all_classes()
         .filter(|class| class.super_name.as_deref() == Some("java/lang/Enum"))
         .map(|class| class.name.clone())
         .collect()

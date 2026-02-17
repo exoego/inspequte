@@ -132,8 +132,7 @@ impl Rule for PreferEnumSetRule {
 Build a set of enum class names during initial scan:
 ```rust
 fn identify_enums(context: &AnalysisContext) -> BTreeSet<String> {
-    context.classes
-        .iter()
+    context.all_classes()
         .filter(|c| c.super_class.as_deref() == Some("java/lang/Enum"))
         .map(|c| c.name.clone())
         .collect()

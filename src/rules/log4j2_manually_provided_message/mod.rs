@@ -33,10 +33,7 @@ impl Rule for Log4j2ManuallyProvidedMessageRule {
         }
 
         let mut results = Vec::new();
-        for class in &context.classes {
-            if !context.is_analysis_target_class(class) {
-                continue;
-            }
+        for class in context.analysis_target_classes() {
             let mut attributes = vec![KeyValue::new("inspequte.class", class.name.clone())];
             if let Some(uri) = context.class_artifact_uri(class) {
                 attributes.push(KeyValue::new("inspequte.artifact_uri", uri));
