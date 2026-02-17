@@ -1,0 +1,4 @@
+interface:
+  display_name: "Inspequte OSS FP Hunt"
+  short_description: "Run OSS-based FP hunts with SARIF and Jaeger evidence"
+  default_prompt: "Run one OSS false-positive hunt for inspequte, collect SARIF findings, capture Jaeger trace evidence, and triage potential FPs."
