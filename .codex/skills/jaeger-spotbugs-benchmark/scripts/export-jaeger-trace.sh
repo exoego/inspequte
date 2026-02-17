@@ -9,7 +9,7 @@ fi
 trace_id="${1:-}"
 service_name="${SERVICE_NAME:-inspequte}"
 jaeger_base_url="${JAEGER_BASE_URL:-http://localhost:16686}"
-out_dir="target/bench"
+out_dir="${JAEGER_OUT_DIR:-target/bench}"
 mkdir -p "${out_dir}"
 
 if [ -z "${trace_id}" ]; then

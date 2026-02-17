@@ -1,6 +1,6 @@
 ---
 name: inspequte-oss-fp-hunt
-description: Run inspequte false-positive hunting against small OSS libraries (Kotlin and Java+Guava), enable inspequte-gradle-plugin in cloned fixtures, capture Jaeger trace screenshots after clicking the button immediately after Expand +1, and triage SARIF findings one by one.
+description: Run inspequte false-positive hunting against small OSS libraries (Kotlin and Java+Guava), enable inspequte-gradle-plugin in cloned fixtures, capture Jaeger trace screenshots via the shared `scripts/capture-jaeger-trace-screenshot.mjs` helper, and triage SARIF findings one by one.
 ---
 
 # inspequte OSS FP hunt
@@ -10,6 +10,7 @@ description: Run inspequte false-positive hunting against small OSS libraries (K
 - Docker available for Jaeger.
 - Java 21 available and set via `JAVA_HOME`.
 - Network access to clone OSS fixtures from GitHub.
+- Node.js + npm available for screenshot capture.
 
 ## Outputs
 - Fixture clones and temporary patches under `target/oss-fp/workdir/`.
@@ -28,12 +29,17 @@ If one fixture is not buildable, replace it with another thin OSS fixture of the
 ## Workflow
 1. Execute `.codex/skills/inspequte-oss-fp-hunt/scripts/run-once.sh` from repository root.
 2. The script clones fixtures, enables `io.github.kengotoda.inspequte` with local `includeBuild`, runs analysis tasks, and exports SARIF + triage placeholders.
-3. Open Jaeger UI and load latest trace for service `inspequte`.
-4. Identify `Expand +1` using this XPath, then click the next sibling button once:
-   - `//*[@id='jaeger-ui-root']//*[contains(@class,'TimelineCollapser--btn-expand')]`
-   - `(//*[@id='jaeger-ui-root']//*[contains(@class,'TimelineCollapser--btn-expand')])[1]/following-sibling::*[contains(@class,'TimelineCollapser--btn')][1]`
-5. Capture a full-page screenshot to `target/oss-fp/jaeger/jaeger-trace-<trace-id>.png`.
-6. Export trace JSON and analyze with `.codex/skills/jaeger-spotbugs-benchmark/scripts/export-jaeger-trace.sh` and `analyze-trace-json.sh`.
+3. Export trace JSON and resolve trace ID:
+   - `trace_json="$(JAEGER_OUT_DIR=target/oss-fp/jaeger .codex/skills/jaeger-spotbugs-benchmark/scripts/export-jaeger-trace.sh)"`
+   - `trace_id="$(basename "${trace_json}" .json)"`
+   - `trace_id="${trace_id#jaeger-trace-}"`
+4. Prepare Playwright runtime once per environment:
+   - `npm install --no-save --no-package-lock playwright@1.53.0`
+   - `npx playwright install --with-deps chromium`
+5. Capture screenshot via shared script:
+   - `screenshot_png="$(JAEGER_OUT_DIR=target/oss-fp/jaeger node scripts/capture-jaeger-trace-screenshot.mjs "${trace_id}")"`
+6. Analyze trace:
+   - `.codex/skills/jaeger-spotbugs-benchmark/scripts/analyze-trace-json.sh "${trace_json}"`
 7. Review findings one-by-one in each triage ledger and classify `TP` or `FP` with short code evidence.
 
 ## Finding triage rules
@@ -49,4 +55,4 @@ For each SARIF result:
 - Do not edit fixture repositories outside `target/oss-fp/workdir/`.
 - Keep all artifacts under `target/oss-fp/`.
 - Do not report performance bottlenecks without numeric evidence from trace summary.
-- Always click the button immediately after `Expand +1` exactly once before full screenshot.
+- Keep screenshot files only under `target/oss-fp/jaeger/`.

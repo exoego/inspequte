@@ -1,10 +1,10 @@
 # Jaeger Screenshot Procedure
 
-1. Open `http://localhost:16686/search`.
-2. Select service `inspequte` and open latest trace.
-3. Identify `Expand +1` and click the next sibling control exactly once:
-   - `//*[@id='jaeger-ui-root']//*[contains(@class,'TimelineCollapser--btn-expand')]`
-   - `(//*[@id='jaeger-ui-root']//*[contains(@class,'TimelineCollapser--btn-expand')])[1]/following-sibling::*[contains(@class,'TimelineCollapser--btn')][1]`
-4. Capture a full-page screenshot and store it under `target/oss-fp/jaeger/`.
+1. Resolve the target trace ID (for OSS FP hunt runs, use `target/oss-fp/report.md`).
+2. Ensure Playwright runtime is installed once:
+   - `npm install --no-save --no-package-lock playwright@1.53.0`
+   - `npx playwright install --with-deps chromium`
+3. Capture a full-page screenshot through the shared helper:
+   - `JAEGER_OUT_DIR=target/oss-fp/jaeger node scripts/capture-jaeger-trace-screenshot.mjs <trace-id>`
 
-If the XPath is unavailable, click the control immediately after the first visible `Expand +` control once.
+The helper script collapses timeline context once before taking the screenshot and falls back across known Jaeger XPath variants.

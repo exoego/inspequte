@@ -1,0 +1,4 @@
+interface:
+  display_name: "Jaeger Trace Screenshot"
+  short_description: "Capture Jaeger timeline screenshots by trace ID"
+  default_prompt: "Use $jaeger-trace-screenshot to capture a Jaeger trace screenshot for a given trace ID."

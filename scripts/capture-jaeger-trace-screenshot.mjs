@@ -10,11 +10,13 @@ if (!traceId) {
 }
 
 const jaegerBaseUrl = (process.env.JAEGER_BASE_URL ?? "http://localhost:16686").replace(/\/$/, "");
-const outDir = process.env.BENCH_OUT_DIR ?? "target/bench";
+const outDir = process.env.JAEGER_OUT_DIR ?? process.env.BENCH_OUT_DIR ?? "target/bench";
 const outFile = path.join(outDir, `jaeger-trace-${traceId}.png`);
 const traceUrl = `${jaegerBaseUrl}/trace/${traceId}`;
 const primaryCollapseXPath =
   "//*[@id=\"jaeger-ui-root\"]/div/div/main/div/section/div/div[1]/div[1]/div/svg[2]";
+const siblingAfterExpandXPath =
+  "(//*[@id='jaeger-ui-root']//*[contains(@class,'TimelineCollapser--btn-expand')])[1]/following-sibling::*[contains(@class,'TimelineCollapser--btn')][1]";
 const fallbackCollapseXPath =
   "(//*[@id=\"jaeger-ui-root\"]//main//*[contains(@class,\"TimelineCollapser\")]//*[name()=\"svg\"])[2]";
 
@@ -45,9 +47,13 @@ try {
   };
 
   const before = await countVisibleSpans();
-  let clicked = await clickOnceByXPath(primaryCollapseXPath);
-  if (!clicked) {
-    clicked = await clickOnceByXPath(fallbackCollapseXPath);
+  const collapseXPaths = [primaryCollapseXPath, siblingAfterExpandXPath, fallbackCollapseXPath];
+  let clicked = false;
+  for (const xpath of collapseXPaths) {
+    clicked = await clickOnceByXPath(xpath);
+    if (clicked) {
+      break;
+    }
   }
 
   await page.waitForTimeout(800);

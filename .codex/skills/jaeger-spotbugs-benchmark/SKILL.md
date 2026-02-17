@@ -1,6 +1,6 @@
 ---
 name: jaeger-spotbugs-benchmark
-description: Launch Jaeger, run SpotBugs benchmark traces, capture Jaeger UI screenshots, and report bottlenecks by rule, jar, and class for inspequte. Use when asked to profile `scripts/bench-spotbugs.sh`, inspect Jaeger traces, click `Collapse +1`, save screenshots under `target/bench`, and explain the slowest components.
+description: Launch Jaeger, run SpotBugs benchmark traces, capture Jaeger UI screenshots via the shared `scripts/capture-jaeger-trace-screenshot.mjs` helper, and report bottlenecks by rule, jar, and class for inspequte. Use when asked to profile `scripts/bench-spotbugs.sh`, inspect Jaeger traces, save screenshots under `target/bench`, and explain the slowest components.
 ---
 
 # jaeger spotbugs benchmark
@@ -10,6 +10,7 @@ description: Launch Jaeger, run SpotBugs benchmark traces, capture Jaeger UI scr
 - Docker available locally.
 - Jaeger UI reachable at `http://localhost:16686`.
 - OTLP HTTP endpoint `http://localhost:4318/`.
+- Node.js + npm available for screenshot capture.
 - Execute all commands from repository root.
 
 ## Outputs
@@ -26,20 +27,17 @@ description: Launch Jaeger, run SpotBugs benchmark traces, capture Jaeger UI scr
    - Run `.codex/skills/jaeger-spotbugs-benchmark/scripts/run-bench-spotbugs-with-otel.sh`.
    - Override repeat count with positional arg when needed.
    - Override endpoint with `OTEL_ENDPOINT` only when explicitly requested.
-3. Open Jaeger UI and load latest trace:
-   - Navigate to `http://localhost:16686/search`.
-   - Set service to `inspequte`.
-   - Run trace search and open the latest trace.
-4. Expand timeline context for visibility:
-   - Use this exact XPath as the primary locator for the `Collapse +1` button:
-     - `//*[@id="jaeger-ui-root"]/div/div/main/div/section/div/div[1]/div[1]/div/svg[2]`
-   - Click that element exactly once.
-   - If that XPath is not present in the current Jaeger UI build, fall back to clicking the first visible control labeled `Collapse +` once.
-5. Capture screenshot:
-   - Save to `target/bench/jaeger-trace-<trace-id>.png`.
-6. Export and analyze trace:
-   - Run `.codex/skills/jaeger-spotbugs-benchmark/scripts/export-jaeger-trace.sh <trace-id>`.
-   - Run `.codex/skills/jaeger-spotbugs-benchmark/scripts/analyze-trace-json.sh <trace-json-path>`.
+3. Export latest trace JSON and resolve trace ID:
+   - `trace_json="$(.codex/skills/jaeger-spotbugs-benchmark/scripts/export-jaeger-trace.sh)"`
+   - `trace_id="$(basename "${trace_json}" .json)"`
+   - `trace_id="${trace_id#jaeger-trace-}"`
+4. Prepare Playwright runtime once per environment:
+   - `npm install --no-save --no-package-lock playwright@1.53.0`
+   - `npx playwright install --with-deps chromium`
+5. Capture screenshot via shared script:
+   - `screenshot_png="$(JAEGER_OUT_DIR=target/bench node scripts/capture-jaeger-trace-screenshot.mjs "${trace_id}")"`
+6. Analyze trace:
+   - `.codex/skills/jaeger-spotbugs-benchmark/scripts/analyze-trace-json.sh "${trace_json}"`
 7. Report bottleneck:
    - Include trace ID and screenshot path.
    - Identify one slowest rule, one slowest jar, and one slowest class.
