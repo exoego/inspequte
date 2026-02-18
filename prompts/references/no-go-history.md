@@ -36,3 +36,11 @@ Append one entry each time verify returns `No-Go`.
 - run-url: N/A (local user decision)
 - status: abandoned (2026-02-18)
 - actions: reverted all uncommitted rule files and registration/snapshot changes; recorded this entry to avoid re-proposing the same low-value idea.
+
+## 2026-02-18T22:27:47Z | string_bytes_without_charset
+- rule-id: `string_bytes_without_charset`
+- rule idea: Detect default-charset String/byte conversion APIs (`String.getBytes()` and `new String(byte[])` without explicit charset).
+- no-go reason: target projects assume JDK 18+ where default charset is UTF-8 by specification (JEP 400), so environment-dependent risk is low and rule value is insufficient.
+- run-url: N/A (local user decision)
+- status: abandoned (2026-02-18)
+- actions: reverted all uncommitted rule files and registration/snapshot changes; documented rationale to avoid re-proposing this rule for JDK 18+ baseline projects.
