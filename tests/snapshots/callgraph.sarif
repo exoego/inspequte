@@ -168,6 +168,13 @@
               }
             },
             {
+              "id": "PRINT_STACK_TRACE",
+              "name": "Direct printStackTrace call",
+              "shortDescription": {
+                "text": "Throwable.printStackTrace should be replaced with structured logging"
+              }
+            },
+            {
               "id": "RECORD_ARRAY_FIELD",
               "name": "Record array field",
               "shortDescription": {
