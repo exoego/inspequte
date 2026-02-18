@@ -28,3 +28,11 @@ Append one entry each time verify returns `No-Go`.
 - status: implemented (2026-02-12)
 - resolution-ref: https://github.com/KengoTODA/inspequte/pull/47
 - actions: imported rule spec/plan/implementation from PR #47, fixed harness output type compatibility, registered `RETURN_IN_FINALLY`, and validated with `cargo fmt`, `cargo build`, `JAVA_HOME=<Java 21> cargo test`, and `cargo audit --format sarif`.
+
+## 2026-02-18T22:12:20Z | deprecated_thread_control
+- rule-id: `deprecated_thread_control`
+- rule idea: Detect deprecated thread-control API calls (`Thread.stop/suspend/resume`) in analysis target classes.
+- no-go reason: deprecated API usage is already surfaced by compiler warnings, so this rule was judged low-value and reverted by user decision.
+- run-url: N/A (local user decision)
+- status: abandoned (2026-02-18)
+- actions: reverted all uncommitted rule files and registration/snapshot changes; recorded this entry to avoid re-proposing the same low-value idea.
