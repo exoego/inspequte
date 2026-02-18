@@ -236,6 +236,13 @@
               "shortDescription": {
                 "text": "String.toLowerCase()/toUpperCase() calls without Locale argument"
               }
+            },
+            {
+              "id": "SYSTEM_EXIT",
+              "name": "System.exit call",
+              "shortDescription": {
+                "text": "Direct calls to System.exit(int) terminate the JVM abruptly"
+              }
             }
           ],
           "semanticVersion": "0.0.0"

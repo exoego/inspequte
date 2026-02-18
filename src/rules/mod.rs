@@ -35,6 +35,7 @@ pub(crate) mod slf4j_placeholder_mismatch;
 pub(crate) mod slf4j_sign_only_format;
 pub(crate) mod slf4j_unknown_array;
 pub(crate) mod string_case_without_locale;
+pub(crate) mod system_exit;
 
 /// Metadata describing an analysis rule.
 #[derive(Clone, Debug)]
@@ -170,7 +171,7 @@ mod tests {
     fn all_rules_registers_expected_rules() {
         let rules = all_rules();
         // Verify we have the expected number of rules
-        assert_eq!(rules.len(), 29, "Expected 29 rules to be registered");
+        assert_eq!(rules.len(), 30, "Expected 30 rules to be registered");
 
         // Verify all rule IDs are unique
         let mut ids: Vec<_> = rules.iter().map(|r| r.metadata().id).collect();
@@ -214,6 +215,7 @@ mod tests {
             "SLF4J_SIGN_ONLY_FORMAT",
             "SLF4J_UNKNOWN_ARRAY",
             "STRING_CASE_WITHOUT_LOCALE",
+            "SYSTEM_EXIT",
         ];
 
         for expected_id in &expected_ids {
