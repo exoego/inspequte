@@ -56,6 +56,13 @@
               }
             },
             {
+              "id": "DELETE_ON_EXIT_CALL",
+              "name": "File.deleteOnExit call",
+              "shortDescription": {
+                "text": "File.deleteOnExit can accumulate pending deletions in long-lived processes"
+              }
+            },
+            {
               "id": "EMPTY_CATCH",
               "name": "Empty catch block",
               "shortDescription": {
