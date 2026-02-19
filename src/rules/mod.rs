@@ -30,6 +30,7 @@ pub(crate) mod prefer_enumset;
 pub(crate) mod print_stack_trace;
 pub(crate) mod record_array_field;
 pub(crate) mod return_in_finally;
+pub(crate) mod run_finalization_call;
 pub(crate) mod runtime_halt_call;
 pub(crate) mod slf4j_format_should_be_const;
 pub(crate) mod slf4j_illegal_passed_class;
@@ -178,7 +179,7 @@ mod tests {
     fn all_rules_registers_expected_rules() {
         let rules = all_rules();
         // Verify we have the expected number of rules
-        assert_eq!(rules.len(), 37, "Expected 37 rules to be registered");
+        assert_eq!(rules.len(), 38, "Expected 38 rules to be registered");
 
         // Verify all rule IDs are unique
         let mut ids: Vec<_> = rules.iter().map(|r| r.metadata().id).collect();
@@ -216,6 +217,7 @@ mod tests {
             "PREFER_ENUMSET",
             "PRINT_STACK_TRACE",
             "RECORD_ARRAY_FIELD",
+            "RUN_FINALIZATION_CALL",
             "RETURN_IN_FINALLY",
             "RUNTIME_HALT_CALL",
             "SLF4J_FORMAT_SHOULD_BE_CONST",
