@@ -7,6 +7,7 @@ use serde_sarif::sarif::{
 use crate::engine::AnalysisContext;
 
 pub(crate) mod array_equals;
+pub(crate) mod bigdecimal_equals_call;
 pub(crate) mod bigdecimal_from_double;
 pub(crate) mod empty_catch;
 pub(crate) mod exception_cause_not_preserved;
@@ -175,7 +176,7 @@ mod tests {
     fn all_rules_registers_expected_rules() {
         let rules = all_rules();
         // Verify we have the expected number of rules
-        assert_eq!(rules.len(), 34, "Expected 34 rules to be registered");
+        assert_eq!(rules.len(), 35, "Expected 35 rules to be registered");
 
         // Verify all rule IDs are unique
         let mut ids: Vec<_> = rules.iter().map(|r| r.metadata().id).collect();
@@ -192,6 +193,7 @@ mod tests {
         let expected_ids = [
             "ARRAY_EQUALS",
             "BIGDECIMAL_FROM_DOUBLE",
+            "BIGDECIMAL_EQUALS_CALL",
             "EMPTY_CATCH",
             "EXPLICIT_GC_CALL",
             "EXCEPTION_CAUSE_NOT_PRESERVED",

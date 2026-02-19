@@ -42,6 +42,13 @@
               }
             },
             {
+              "id": "BIGDECIMAL_EQUALS_CALL",
+              "name": "BigDecimal equals call",
+              "shortDescription": {
+                "text": "BigDecimal.equals compares value and scale instead of numeric equality"
+              }
+            },
+            {
               "id": "BIGDECIMAL_FROM_DOUBLE",
               "name": "BigDecimal from double",
               "shortDescription": {
