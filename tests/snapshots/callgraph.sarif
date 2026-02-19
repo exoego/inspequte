@@ -77,6 +77,13 @@
               }
             },
             {
+              "id": "DESERIALIZATION_READ_OBJECT_CALL",
+              "name": "ObjectInputStream deserialization call",
+              "shortDescription": {
+                "text": "readObject/readUnshared are high-risk Java deserialization entry points"
+              }
+            },
+            {
               "id": "EMPTY_CATCH",
               "name": "Empty catch block",
               "shortDescription": {
