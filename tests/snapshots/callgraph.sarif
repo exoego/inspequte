@@ -264,6 +264,13 @@
               "shortDescription": {
                 "text": "Direct calls to System.exit(int) terminate the JVM abruptly"
               }
+            },
+            {
+              "id": "THREAD_RUN_DIRECT_CALL",
+              "name": "Thread.run direct call",
+              "shortDescription": {
+                "text": "Direct Thread.run() calls execute synchronously on the current thread"
+              }
             }
           ],
           "semanticVersion": "0.0.0"
