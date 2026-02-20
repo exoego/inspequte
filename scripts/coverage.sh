@@ -15,8 +15,9 @@ fi
 
 mkdir -p "${coverage_root}"
 
-cargo llvm-cov --workspace --all-features --lcov --output-path "${lcov_path}"
-cargo llvm-cov --workspace --all-features --html --output-dir "${html_dir}"
+cargo llvm-cov --workspace --all-features --no-report
+cargo llvm-cov report --lcov --output-path "${lcov_path}"
+cargo llvm-cov report --html --output-dir "${html_dir}"
 
 echo "coverage: ${lcov_path}"
 echo "coverage: ${html_dir}"
