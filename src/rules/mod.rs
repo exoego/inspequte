@@ -51,6 +51,7 @@ pub(crate) mod string_intern_call;
 pub(crate) mod system_exit;
 pub(crate) mod thread_run_direct_call;
 pub(crate) mod url_equals_call;
+pub(crate) mod url_hashcode_call;
 
 /// Metadata describing an analysis rule.
 #[derive(Clone, Debug)]
@@ -210,7 +211,7 @@ mod tests {
     fn all_rules_registers_expected_rules() {
         let rules = all_rules();
         // Verify we have the expected number of rules
-        assert_eq!(rules.len(), 45, "Expected 45 rules to be registered");
+        assert_eq!(rules.len(), 46, "Expected 46 rules to be registered");
 
         // Verify all rule IDs are unique
         let mut ids: Vec<_> = rules.iter().map(|r| r.metadata().id).collect();
@@ -270,6 +271,7 @@ mod tests {
             "SYSTEM_EXIT",
             "THREAD_RUN_DIRECT_CALL",
             "URL_EQUALS_CALL",
+            "URL_HASHCODE_CALL",
         ];
 
         for expected_id in &expected_ids {

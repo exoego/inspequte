@@ -348,6 +348,13 @@
               "shortDescription": {
                 "text": "URL.equals may trigger host resolution and surprising equality semantics"
               }
+            },
+            {
+              "id": "URL_HASHCODE_CALL",
+              "name": "URL hashCode call",
+              "shortDescription": {
+                "text": "URL.hashCode may trigger host resolution and surprising hash semantics"
+              }
             }
           ],
           "semanticVersion": "0.0.0"
