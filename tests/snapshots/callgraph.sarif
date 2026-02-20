@@ -364,6 +364,13 @@
               }
             },
             {
+              "id": "THREAD_SLEEP_CALL",
+              "name": "Thread.sleep call",
+              "shortDescription": {
+                "text": "Thread.sleep introduces timing-coupled blocking"
+              }
+            },
+            {
               "id": "URL_EQUALS_CALL",
               "name": "URL equals call",
               "shortDescription": {
