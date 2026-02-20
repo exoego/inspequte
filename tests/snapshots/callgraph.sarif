@@ -196,6 +196,13 @@
               }
             },
             {
+              "id": "LONG_GETLONG_CALL",
+              "name": "Long.getLong call",
+              "shortDescription": {
+                "text": "Long.getLong reads system properties, not numeric input strings"
+              }
+            },
+            {
               "id": "MUTATE_UNMODIFIABLE_COLLECTION",
               "name": "Mutation on unmodifiable collection",
               "shortDescription": {

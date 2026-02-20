@@ -29,6 +29,7 @@ pub(crate) mod log4j2_logger_should_be_private;
 pub(crate) mod log4j2_manually_provided_message;
 pub(crate) mod log4j2_sign_only_format;
 pub(crate) mod log4j2_unknown_array;
+pub(crate) mod long_getlong_call;
 pub(crate) mod mutate_unmodifiable_collection;
 pub(crate) mod nullness;
 pub(crate) mod object_wait_without_timeout;
@@ -212,7 +213,7 @@ mod tests {
     fn all_rules_registers_expected_rules() {
         let rules = all_rules();
         // Verify we have the expected number of rules
-        assert_eq!(rules.len(), 47, "Expected 47 rules to be registered");
+        assert_eq!(rules.len(), 48, "Expected 48 rules to be registered");
 
         // Verify all rule IDs are unique
         let mut ids: Vec<_> = rules.iter().map(|r| r.metadata().id).collect();
@@ -243,6 +244,7 @@ mod tests {
             "INTERRUPTED_EXCEPTION_NOT_RESTORED",
             "FUTURE_GET_WITHOUT_TIMEOUT",
             "LOCK_NOT_RELEASED_ON_EXCEPTION_PATH",
+            "LONG_GETLONG_CALL",
             "LOG4J2_FORMAT_SHOULD_BE_CONST",
             "LOG4J2_ILLEGAL_PASSED_CLASS",
             "LOG4J2_LOGGER_SHOULD_BE_FINAL",
