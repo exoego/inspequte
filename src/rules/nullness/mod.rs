@@ -1185,6 +1185,7 @@ mod tests {
     fn class_with_methods(name: &str, super_name: Option<&str>, methods: Vec<Method>) -> Class {
         Class {
             name: name.to_string(),
+            source_file: None,
             super_name: super_name.map(str::to_string),
             interfaces: Vec::new(),
             type_parameters: Vec::new(),

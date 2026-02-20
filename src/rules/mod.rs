@@ -127,6 +127,22 @@ pub(crate) fn method_location_with_line(
                 .physical_location(physical)
                 .build();
         }
+        let artifact_location = ArtifactLocation::builder().uri(uri.to_string()).build();
+        let physical = if let Some(line) = line {
+            let region = Region::builder().start_line(line as i64).build();
+            PhysicalLocation::builder()
+                .artifact_location(artifact_location)
+                .region(region)
+                .build()
+        } else {
+            PhysicalLocation::builder()
+                .artifact_location(artifact_location)
+                .build()
+        };
+        return Location::builder()
+            .logical_locations(vec![logical])
+            .physical_location(physical)
+            .build();
     }
     Location::builder().logical_locations(vec![logical]).build()
 }
@@ -168,6 +184,14 @@ pub(crate) fn class_location(class_name: &str, artifact_uri: Option<&str>) -> Lo
                 .physical_location(physical)
                 .build();
         }
+        let artifact_location = ArtifactLocation::builder().uri(uri.to_string()).build();
+        let physical = PhysicalLocation::builder()
+            .artifact_location(artifact_location)
+            .build();
+        return Location::builder()
+            .logical_locations(vec![logical])
+            .physical_location(physical)
+            .build();
     }
     Location::builder().logical_locations(vec![logical]).build()
 }

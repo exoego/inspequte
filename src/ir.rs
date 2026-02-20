@@ -4,6 +4,7 @@
 #[derive(Clone, Debug)]
 pub(crate) struct Class {
     pub(crate) name: String,
+    pub(crate) source_file: Option<String>,
     pub(crate) super_name: Option<String>,
     pub(crate) interfaces: Vec<String>,
     pub(crate) type_parameters: Vec<TypeParameterUse>,

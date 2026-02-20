@@ -69,6 +69,7 @@ mod tests {
         let classes = vec![
             Class {
                 name: "com/example/Foo".to_string(),
+                source_file: None,
                 super_name: None,
                 interfaces: Vec::new(),
                 type_parameters: Vec::new(),
@@ -80,6 +81,7 @@ mod tests {
             },
             Class {
                 name: "com/example/Bar".to_string(),
+                source_file: None,
                 super_name: None,
                 interfaces: Vec::new(),
                 type_parameters: Vec::new(),
@@ -100,6 +102,7 @@ mod tests {
     fn resolve_classpath_allows_missing_classes() {
         let classes = vec![Class {
             name: "com/example/Foo".to_string(),
+            source_file: None,
             super_name: None,
             interfaces: Vec::new(),
             type_parameters: Vec::new(),
@@ -120,6 +123,7 @@ mod tests {
         let classes = vec![
             Class {
                 name: "com/example/Foo".to_string(),
+                source_file: None,
                 super_name: None,
                 interfaces: Vec::new(),
                 type_parameters: Vec::new(),
@@ -131,6 +135,7 @@ mod tests {
             },
             Class {
                 name: "com/example/Foo".to_string(),
+                source_file: None,
                 super_name: None,
                 interfaces: Vec::new(),
                 type_parameters: Vec::new(),

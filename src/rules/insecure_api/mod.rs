@@ -118,6 +118,7 @@ mod tests {
     fn class_with_methods(name: &str, methods: Vec<Method>) -> Class {
         Class {
             name: name.to_string(),
+            source_file: None,
             super_name: None,
             interfaces: Vec::new(),
             type_parameters: Vec::new(),
@@ -136,6 +137,7 @@ mod tests {
     ) -> Class {
         Class {
             name: name.to_string(),
+            source_file: None,
             super_name: None,
             interfaces: Vec::new(),
             type_parameters: Vec::new(),

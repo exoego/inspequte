@@ -249,6 +249,7 @@ fn scan_class_file(
     };
     classes.push(Class {
         name: parsed.name,
+        source_file: parsed.source_file,
         super_name: parsed.super_name,
         interfaces: parsed.interfaces,
         type_parameters: parsed.type_parameters,
@@ -443,6 +444,7 @@ fn parse_jar_classes(
     for (_, parsed) in parsed {
         classes.push(Class {
             name: parsed.name,
+            source_file: parsed.source_file,
             super_name: parsed.super_name,
             interfaces: parsed.interfaces,
             type_parameters: parsed.type_parameters,
@@ -785,6 +787,7 @@ fn is_jar_path(path: &Path) -> bool {
 /// Parsed class data extracted from class file bytes.
 struct ParsedClass {
     name: String,
+    source_file: Option<String>,
     super_name: Option<String>,
     interfaces: Vec<String>,
     type_parameters: Vec<TypeParameterUse>,
@@ -808,6 +811,8 @@ fn parse_class_bytes(data: &[u8]) -> Result<ParsedClass> {
     let constant_pool = class_file.constant_pool();
     let class_name =
         resolve_class_name(constant_pool, class_file.this_class()).context("resolve class name")?;
+    let source_file =
+        parse_source_file(class_file.attributes(), constant_pool).context("parse source file")?;
     let super_name = if class_file.super_class() == 0 {
         None
     } else {
@@ -851,6 +856,7 @@ fn parse_class_bytes(data: &[u8]) -> Result<ParsedClass> {
 
     Ok(ParsedClass {
         name: class_name,
+        source_file,
         super_name,
         interfaces,
         type_parameters,
@@ -938,6 +944,7 @@ fn parse_class_bytes_minimal(data: &[u8]) -> Result<ParsedClass> {
 
     Ok(ParsedClass {
         name: class_name,
+        source_file: None,
         super_name,
         interfaces,
         type_parameters: Vec::new(),
@@ -1253,6 +1260,21 @@ fn parse_signature(
         let signature =
             resolve_utf8(constant_pool, *signature_index).context("resolve signature")?;
         return Ok(Some(signature));
+    }
+    Ok(None)
+}
+
+fn parse_source_file(
+    attributes: &[jclassfile::attributes::Attribute],
+    constant_pool: &[ConstantPool],
+) -> Result<Option<String>> {
+    for attribute in attributes {
+        let jclassfile::attributes::Attribute::SourceFile { sourcefile_index } = attribute else {
+            continue;
+        };
+        let source_file =
+            resolve_utf8(constant_pool, *sourcefile_index).context("resolve source file")?;
+        return Ok(Some(source_file));
     }
     Ok(None)
 }

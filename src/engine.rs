@@ -192,16 +192,19 @@ impl AnalysisContext {
 
     pub(crate) fn class_artifact_uri(&self, class: &Class) -> Option<String> {
         let uri = self.artifact_uri(class.artifact_index)?;
-        if uri.ends_with(".class") {
-            return Some(uri.to_string());
-        }
-        if uri.ends_with(".jar") {
+        let class_uri = if uri.ends_with(".class") {
+            uri.to_string()
+        } else if uri.ends_with(".jar") {
             if uri.starts_with("jar:") {
-                return Some(format!("{uri}!/{}.class", class.name));
+                format!("{uri}!/{}.class", class.name)
+            } else {
+                format!("jar:{uri}!/{}.class", class.name)
             }
-            return Some(format!("jar:{uri}!/{}.class", class.name));
-        }
-        None
+        } else {
+            return None;
+        };
+
+        class_source_uri(&class_uri, class).or(Some(class_uri))
     }
 
     pub(crate) fn has_slf4j(&self) -> bool {
@@ -211,6 +214,16 @@ impl AnalysisContext {
     pub(crate) fn has_log4j2(&self) -> bool {
         self.has_log4j2
     }
+}
+
+fn class_source_uri(class_uri: &str, class: &Class) -> Option<String> {
+    if !class_uri.ends_with(".class") {
+        return None;
+    }
+
+    let source_name = class.source_file.as_deref()?;
+    let prefix = class_uri.rsplit_once('/').map(|(prefix, _)| prefix)?;
+    Some(format!("{prefix}/{source_name}"))
 }
 
 fn detect_logging_frameworks(classes: &[Class], telemetry: Option<&Telemetry>) -> (bool, bool) {
@@ -372,6 +385,7 @@ mod tests {
     fn class_with_artifact(name: &str, artifact_index: i64) -> Class {
         Class {
             name: name.to_string(),
+            source_file: None,
             super_name: None,
             interfaces: Vec::new(),
             type_parameters: Vec::new(),
@@ -467,5 +481,122 @@ mod tests {
         assert_eq!(context.analysis_target_classes().len(), 2);
         assert!(context.dependency_classes().is_empty());
         assert_eq!(all_names, vec!["com/example/ClassA", "com/example/ClassB"]);
+    }
+
+    #[test]
+    fn class_artifact_uri_uses_source_file_name_for_class_artifact() {
+        let classes = vec![Class {
+            name: "com/example/ClassA".to_string(),
+            source_file: Some("ClassA.java".to_string()),
+            super_name: None,
+            interfaces: Vec::new(),
+            type_parameters: Vec::new(),
+            referenced_classes: Vec::new(),
+            fields: Vec::new(),
+            methods: Vec::new(),
+            artifact_index: 0,
+            is_record: false,
+        }];
+        let artifacts = vec![
+            Artifact::builder()
+                .location(
+                    ArtifactLocation::builder()
+                        .uri("file:///tmp/build/classes/com/example/ClassA.class".to_string())
+                        .build(),
+                )
+                .build(),
+        ];
+
+        let context = build_context(classes, &artifacts);
+        let class = &context.analysis_target_classes()[0];
+        assert_eq!(
+            context.class_artifact_uri(class),
+            Some("file:///tmp/build/classes/com/example/ClassA.java".to_string())
+        );
+    }
+
+    #[test]
+    fn class_artifact_uri_keeps_class_uri_when_source_file_is_missing() {
+        let classes = vec![class_with_artifact("com/example/ClassA", 0)];
+        let artifacts = vec![
+            Artifact::builder()
+                .location(
+                    ArtifactLocation::builder()
+                        .uri("file:///tmp/build/classes/com/example/ClassA.class".to_string())
+                        .build(),
+                )
+                .build(),
+        ];
+
+        let context = build_context(classes, &artifacts);
+        let class = &context.analysis_target_classes()[0];
+        assert_eq!(
+            context.class_artifact_uri(class),
+            Some("file:///tmp/build/classes/com/example/ClassA.class".to_string())
+        );
+    }
+
+    #[test]
+    fn class_artifact_uri_uses_source_file_attribute_name_when_available() {
+        let classes = vec![Class {
+            name: "com/example/FileAKt".to_string(),
+            source_file: Some("file_a.kt".to_string()),
+            super_name: None,
+            interfaces: Vec::new(),
+            type_parameters: Vec::new(),
+            referenced_classes: Vec::new(),
+            fields: Vec::new(),
+            methods: Vec::new(),
+            artifact_index: 0,
+            is_record: false,
+        }];
+        let artifacts = vec![
+            Artifact::builder()
+                .location(
+                    ArtifactLocation::builder()
+                        .uri("file:///tmp/build/classes/com/example/FileAKt.class".to_string())
+                        .build(),
+                )
+                .build(),
+        ];
+
+        let context = build_context(classes, &artifacts);
+        let class = &context.analysis_target_classes()[0];
+        assert_eq!(
+            context.class_artifact_uri(class),
+            Some("file:///tmp/build/classes/com/example/file_a.kt".to_string())
+        );
+    }
+
+    #[test]
+    fn class_artifact_uri_uses_outer_source_file_for_inner_class() {
+        let classes = vec![Class {
+            name: "com/example/ClassA$Inner".to_string(),
+            source_file: Some("ClassA.java".to_string()),
+            super_name: None,
+            interfaces: Vec::new(),
+            type_parameters: Vec::new(),
+            referenced_classes: Vec::new(),
+            fields: Vec::new(),
+            methods: Vec::new(),
+            artifact_index: 0,
+            is_record: false,
+        }];
+        let artifacts = vec![
+            Artifact::builder()
+                .location(
+                    ArtifactLocation::builder()
+                        .uri("file:///tmp/build/classes/com/example/ClassA$Inner.class".to_string())
+                        .build(),
+                )
+                .build(),
+        ];
+
+        let context = build_context(classes, &artifacts);
+        let class = &context.analysis_target_classes()[0];
+        assert_eq!(
+            context.class_artifact_uri(class),
+            Some("file:///tmp/build/classes/com/example/ClassA.java".to_string())
+        );
     }
 }
