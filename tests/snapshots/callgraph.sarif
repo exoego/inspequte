@@ -70,6 +70,13 @@
               }
             },
             {
+              "id": "BOOLEAN_GETBOOLEAN_CALL",
+              "name": "Boolean.getBoolean call",
+              "shortDescription": {
+                "text": "Boolean.getBoolean reads system properties, not text booleans"
+              }
+            },
+            {
               "id": "DELETE_ON_EXIT_CALL",
               "name": "File.deleteOnExit call",
               "shortDescription": {
