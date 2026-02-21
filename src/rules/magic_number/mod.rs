@@ -195,10 +195,17 @@ fn is_collection_like_type(owner: &str) -> bool {
             | "java/util/LinkedHashSet"
             | "java/util/HashMap"
             | "java/util/LinkedHashMap"
+            | "java/util/WeakHashMap"
+            | "java/util/IdentityHashMap"
             | "java/util/Hashtable"
             | "java/util/Vector"
             | "java/util/PriorityQueue"
             | "java/util/ArrayDeque"
+            | "java/util/concurrent/ConcurrentHashMap"
+            | "java/util/concurrent/LinkedBlockingQueue"
+            | "java/util/concurrent/ArrayBlockingQueue"
+            | "java/util/concurrent/PriorityBlockingQueue"
+            | "java/util/concurrent/LinkedBlockingDeque"
     )
 }
 
