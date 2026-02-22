@@ -5,7 +5,7 @@ use opentelemetry::KeyValue;
 use serde_sarif::sarif::Result as SarifResult;
 
 use crate::engine::AnalysisContext;
-use crate::ir::{Class, InstructionKind, Method};
+use crate::ir::{AnnotationDefaultNumeric, CallKind, Class, InstructionKind, Method};
 use crate::opcodes;
 use crate::rules::{Rule, RuleMetadata, method_location_with_line, result_message};
 
@@ -50,6 +50,7 @@ impl Rule for MagicNumberRule {
                         scan_method_body(
                             method,
                             &class.name,
+                            class.super_name.as_deref(),
                             artifact_uri.as_deref(),
                             &allowlist,
                             &mut class_results,
@@ -64,7 +65,26 @@ impl Rule for MagicNumberRule {
                             &allowlist,
                             &mut class_results,
                         );
+
+                        // Scan Kotlin $default synthetic methods and attribute
+                        // any magic numbers to this enclosing method.
+                        scan_default_arg_bodies(
+                            method,
+                            class,
+                            artifact_uri.as_deref(),
+                            &allowlist,
+                            &mut class_results,
+                        );
                     }
+
+                    // Scan annotation default values.
+                    scan_annotation_defaults(
+                        class,
+                        artifact_uri.as_deref(),
+                        &allowlist,
+                        &mut class_results,
+                    );
+
                     Ok(class_results)
                 })?;
             results.extend(class_results);
@@ -77,6 +97,7 @@ impl Rule for MagicNumberRule {
 fn scan_method_body(
     method: &Method,
     class_name: &str,
+    class_super_name: Option<&str>,
     artifact_uri: Option<&str>,
     allowlist: &HashSet<i64>,
     results: &mut Vec<SarifResult>,
@@ -103,6 +124,15 @@ fn scan_method_body(
             continue;
         }
         if is_collection_capacity_context(&instructions, idx) {
+            continue;
+        }
+        if is_enum_constructor_context(
+            &instructions,
+            idx,
+            &method.name,
+            class_name,
+            class_super_name,
+        ) {
             continue;
         }
 
@@ -200,6 +230,134 @@ fn scan_lambda_bodies(
             );
         }
     }
+}
+
+/// Find Kotlin `$default` synthetic static methods for a given method
+/// and scan them for magic numbers, attributing any findings to the
+/// enclosing real method.
+fn scan_default_arg_bodies(
+    method: &Method,
+    class: &Class,
+    artifact_uri: Option<&str>,
+    allowlist: &HashSet<i64>,
+    results: &mut Vec<SarifResult>,
+) {
+    let default_name = format!("{}$default", method.name);
+    for default_method in class
+        .methods
+        .iter()
+        .filter(|m| m.access.is_synthetic && m.access.is_static && m.name == default_name)
+    {
+        let default_instructions = collect_instructions(default_method);
+        for (idx, inst) in default_instructions.iter().enumerate() {
+            let value_str = match &inst.kind {
+                InstructionKind::ConstInt(v) => {
+                    if is_int_allowlisted(*v, allowlist) {
+                        continue;
+                    }
+                    format_int(*v)
+                }
+                InstructionKind::ConstFloat(v) => {
+                    if is_float_allowlisted(*v) {
+                        continue;
+                    }
+                    format_float(*v)
+                }
+                _ => continue,
+            };
+
+            if is_array_creation_context(&default_instructions, idx) {
+                continue;
+            }
+            if is_collection_capacity_context(&default_instructions, idx) {
+                continue;
+            }
+
+            let message = result_message(format!(
+                "Magic number {} in {}.{}{}",
+                value_str, class.name, method.name, method.descriptor
+            ));
+            let line = default_method.line_for_offset(inst.offset);
+            let location = method_location_with_line(
+                &class.name,
+                &method.name,
+                &method.descriptor,
+                artifact_uri,
+                line,
+            );
+            results.push(
+                SarifResult::builder()
+                    .message(message)
+                    .locations(vec![location])
+                    .build(),
+            );
+        }
+    }
+}
+
+/// Scan annotation default values for magic numbers.
+fn scan_annotation_defaults(
+    class: &Class,
+    artifact_uri: Option<&str>,
+    allowlist: &HashSet<i64>,
+    results: &mut Vec<SarifResult>,
+) {
+    for default in &class.annotation_defaults {
+        let should_report = match &default.value {
+            AnnotationDefaultNumeric::Int(v) => !is_int_allowlisted(*v, allowlist),
+            AnnotationDefaultNumeric::Float(v) => !is_float_allowlisted(*v),
+        };
+        if !should_report {
+            continue;
+        }
+        let value_str = match &default.value {
+            AnnotationDefaultNumeric::Int(v) => format_int(*v),
+            AnnotationDefaultNumeric::Float(v) => format_float(*v),
+        };
+        let message = result_message(format!(
+            "Magic number {} in {}.{}{}",
+            value_str, class.name, default.method_name, default.method_descriptor
+        ));
+        let location = method_location_with_line(
+            &class.name,
+            &default.method_name,
+            &default.method_descriptor,
+            artifact_uri,
+            None,
+        );
+        results.push(
+            SarifResult::builder()
+                .message(message)
+                .locations(vec![location])
+                .build(),
+        );
+    }
+}
+
+/// Check if a constant in `<clinit>` feeds an enum constructor call.
+fn is_enum_constructor_context(
+    instructions: &[FlatInstruction],
+    idx: usize,
+    method_name: &str,
+    class_name: &str,
+    class_super_name: Option<&str>,
+) -> bool {
+    if method_name != "<clinit>" || class_super_name != Some("java/lang/Enum") {
+        return false;
+    }
+    // Look ahead for invokespecial SameClass.<init> within a small window.
+    let limit = (idx + 9).min(instructions.len());
+    for i in (idx + 1)..limit {
+        if let InstructionKind::Invoke(call) = &instructions[i].kind {
+            if call.kind == CallKind::Special
+                && call.name == "<init>"
+                && call.owner == class_name
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Collected instruction with offset, opcode, and kind from CFG blocks.
@@ -340,11 +498,12 @@ mod tests {
 
     fn compile_and_analyze(
         harness: &JvmTestHarness,
+        language: Language,
         sources: &[SourceFile],
         classpath: &[PathBuf],
     ) -> crate::engine::EngineOutput {
         harness
-            .compile_and_analyze(Language::Java, sources, classpath)
+            .compile_and_analyze(language, sources, classpath)
             .expect("run harness analysis")
     }
 
@@ -366,7 +525,7 @@ public class ClassA {
             .to_string(),
         }];
 
-        let output = compile_and_analyze(&harness, &sources, &[]);
+        let output = compile_and_analyze(&harness, Language::Java, &sources, &[]);
         let messages = magic_number_messages(&output);
         assert!(
             messages.iter().any(|msg| msg.contains("3600")),
@@ -390,7 +549,7 @@ public class ClassA {
             .to_string(),
         }];
 
-        let output = compile_and_analyze(&harness, &sources, &[]);
+        let output = compile_and_analyze(&harness, Language::Java, &sources, &[]);
         let messages = magic_number_messages(&output);
         assert!(
             messages.iter().any(|msg| msg.contains("9.81")),
@@ -417,7 +576,7 @@ public class ClassA {
             .to_string(),
         }];
 
-        let output = compile_and_analyze(&harness, &sources, &[]);
+        let output = compile_and_analyze(&harness, Language::Java, &sources, &[]);
         let messages = magic_number_messages(&output);
         assert!(
             messages.is_empty(),
@@ -441,7 +600,7 @@ public class ClassA {
             .to_string(),
         }];
 
-        let output = compile_and_analyze(&harness, &sources, &[]);
+        let output = compile_and_analyze(&harness, Language::Java, &sources, &[]);
         let messages = magic_number_messages(&output);
         assert!(
             messages.is_empty(),
@@ -468,7 +627,7 @@ public class ClassA {
             .to_string(),
         }];
 
-        let output = compile_and_analyze(&harness, &sources, &[]);
+        let output = compile_and_analyze(&harness, Language::Java, &sources, &[]);
         let messages = magic_number_messages(&output);
         assert!(
             messages.is_empty(),
@@ -496,7 +655,7 @@ public class ClassA {
             .to_string(),
         }];
 
-        let output = compile_and_analyze(&harness, &sources, &[]);
+        let output = compile_and_analyze(&harness, Language::Java, &sources, &[]);
         let messages = magic_number_messages(&output);
         // Switch case values are embedded in tableswitch/lookupswitch instructions,
         // not pushed via bipush/sipush/ldc, so they should not be reported.
@@ -522,7 +681,7 @@ public class ClassA {
             .to_string(),
         }];
 
-        let output = compile_and_analyze(&harness, &sources, &[]);
+        let output = compile_and_analyze(&harness, Language::Java, &sources, &[]);
         let messages = magic_number_messages(&output);
         assert!(
             messages.iter().any(|msg| msg.contains("-128")),
@@ -547,7 +706,7 @@ public class ClassA {
             .to_string(),
         }];
 
-        let output = compile_and_analyze(&harness, &sources, &[]);
+        let output = compile_and_analyze(&harness, Language::Java, &sources, &[]);
         let messages = magic_number_messages(&output);
         assert!(
             messages.is_empty(),
@@ -586,7 +745,7 @@ public class ClassA implements Supplier<Integer> {
             },
         ];
 
-        let output = compile_and_analyze(&harness, &sources, &[]);
+        let output = compile_and_analyze(&harness, Language::Java, &sources, &[]);
         let messages = magic_number_messages(&output);
         // The bridge method `get()Ljava/lang/Object;` delegates to
         // `get()Ljava/lang/Integer;`. Only the real method should report.
@@ -627,7 +786,7 @@ public class ClassA {
             .to_string(),
         }];
 
-        let output = compile_and_analyze(&harness, &sources, &[]);
+        let output = compile_and_analyze(&harness, Language::Java, &sources, &[]);
         let messages = magic_number_messages(&output);
         // The literal 3600 in the lambda is attributed to `methodOne`.
         // No finding should reference the synthetic lambda method name.
@@ -636,6 +795,115 @@ public class ClassA {
             vec![
                 "Magic number 3600 in com/example/ClassA.methodOne()Ljava/util/function/IntSupplier;"
             ],
+        );
+    }
+
+    #[test]
+    fn ignores_enum_constructor_arguments() {
+        let harness = JvmTestHarness::new().expect("JAVA_HOME must be set for harness tests");
+        let sources = vec![SourceFile {
+            path: "com/example/EnumA.java".to_string(),
+            contents: r#"
+package com.example;
+public enum EnumA {
+    ENTRY_ONE(3600),
+    ENTRY_TWO(7200);
+
+    private final int varOne;
+    EnumA(int varOne) {
+        this.varOne = varOne;
+    }
+    public int getVarOne() { return varOne; }
+}
+"#
+            .to_string(),
+        }];
+
+        let output = compile_and_analyze(&harness, Language::Java, &sources, &[]);
+        let messages = magic_number_messages(&output);
+        assert!(
+            messages.is_empty(),
+            "did not expect findings for enum constructor arguments: {messages:?}"
+        );
+    }
+
+    #[test]
+    fn ignores_kotlin_const_val() {
+        let harness = JvmTestHarness::new().expect("JAVA_HOME must be set for harness tests");
+        if !harness.has_kotlinc() {
+            eprintln!("skipping: kotlinc not available");
+            return;
+        }
+        let sources = vec![SourceFile {
+            path: "com/example/ClassA.kt".to_string(),
+            contents: r#"
+package com.example
+class ClassA {
+    companion object {
+        const val CONST_ONE = 3600
+    }
+}
+"#
+            .to_string(),
+        }];
+
+        let output = compile_and_analyze(&harness, Language::Kotlin, &sources, &[]);
+        let messages = magic_number_messages(&output);
+        assert!(
+            messages.is_empty(),
+            "did not expect findings for Kotlin const val: {messages:?}"
+        );
+    }
+
+    #[test]
+    fn reports_annotation_default_value() {
+        let harness = JvmTestHarness::new().expect("JAVA_HOME must be set for harness tests");
+        let sources = vec![SourceFile {
+            path: "com/example/AnnotationA.java".to_string(),
+            contents: r#"
+package com.example;
+public @interface AnnotationA {
+    int methodOne() default 3600;
+}
+"#
+            .to_string(),
+        }];
+
+        let output = compile_and_analyze(&harness, Language::Java, &sources, &[]);
+        let messages = magic_number_messages(&output);
+        assert!(
+            messages.iter().any(|msg| msg.contains("3600")),
+            "expected magic number 3600 finding for annotation default, got {messages:?}"
+        );
+    }
+
+    #[test]
+    fn reports_kotlin_default_argument_value() {
+        let harness = JvmTestHarness::new().expect("JAVA_HOME must be set for harness tests");
+        if !harness.has_kotlinc() {
+            eprintln!("skipping: kotlinc not available");
+            return;
+        }
+        let sources = vec![SourceFile {
+            path: "com/example/ClassA.kt".to_string(),
+            contents: r#"
+package com.example
+class ClassA {
+    fun methodOne(varOne: Int = 3600): Int {
+        return varOne
+    }
+}
+"#
+            .to_string(),
+        }];
+
+        let output = compile_and_analyze(&harness, Language::Kotlin, &sources, &[]);
+        let messages = magic_number_messages(&output);
+        assert!(
+            messages
+                .iter()
+                .any(|msg| msg.contains("3600") && msg.contains("methodOne")),
+            "expected magic number 3600 attributed to methodOne, got {messages:?}"
         );
     }
 }

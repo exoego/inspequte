@@ -11,8 +11,24 @@ pub(crate) struct Class {
     pub(crate) referenced_classes: Vec<String>,
     pub(crate) fields: Vec<Field>,
     pub(crate) methods: Vec<Method>,
+    pub(crate) annotation_defaults: Vec<AnnotationDefaultValue>,
     pub(crate) artifact_index: i64,
     pub(crate) is_record: bool,
+}
+
+/// Numeric default value from an annotation method's AnnotationDefault attribute.
+#[derive(Clone, Debug)]
+pub(crate) struct AnnotationDefaultValue {
+    pub(crate) method_name: String,
+    pub(crate) method_descriptor: String,
+    pub(crate) value: AnnotationDefaultNumeric,
+}
+
+/// Numeric type of an annotation default value.
+#[derive(Clone, Debug)]
+pub(crate) enum AnnotationDefaultNumeric {
+    Int(i64),
+    Float(f64),
 }
 
 /// Field definition for a class.

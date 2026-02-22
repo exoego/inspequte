@@ -21,9 +21,10 @@ use rayon::prelude::*;
 use crate::cfg::build_cfg;
 use crate::descriptor::method_param_count;
 use crate::ir::{
-    CallKind, CallSite, Class, ClassTypeUse, ExceptionHandler, Field, FieldAccess, Instruction,
-    InstructionKind, LineNumber, LocalVariableType, Method, MethodAccess, MethodNullness,
-    MethodTypeUse, Nullness, TypeParameterUse, TypeUse, TypeUseKind,
+    AnnotationDefaultNumeric, AnnotationDefaultValue, CallKind, CallSite, Class, ClassTypeUse,
+    ExceptionHandler, Field, FieldAccess, Instruction, InstructionKind, LineNumber,
+    LocalVariableType, Method, MethodAccess, MethodNullness, MethodTypeUse, Nullness,
+    TypeParameterUse, TypeUse, TypeUseKind,
 };
 use crate::opcodes;
 use crate::telemetry::Telemetry;
@@ -256,6 +257,7 @@ fn scan_class_file(
         referenced_classes: parsed.referenced_classes,
         fields: parsed.fields,
         methods: parsed.methods,
+        annotation_defaults: parsed.annotation_defaults,
         artifact_index,
         is_record: parsed.is_record,
     });
@@ -451,6 +453,7 @@ fn parse_jar_classes(
             referenced_classes: parsed.referenced_classes,
             fields: parsed.fields,
             methods: parsed.methods,
+            annotation_defaults: parsed.annotation_defaults,
             artifact_index: jar_index,
             is_record: parsed.is_record,
         });
@@ -794,6 +797,7 @@ struct ParsedClass {
     referenced_classes: Vec<String>,
     fields: Vec<crate::ir::Field>,
     methods: Vec<Method>,
+    annotation_defaults: Vec<AnnotationDefaultValue>,
     is_record: bool,
 }
 
@@ -869,6 +873,8 @@ fn parse_class_bytes(data: &[u8]) -> Result<ParsedClass> {
         &bootstrap_methods,
     )
     .context("parse method bytecode")?;
+    let annotation_defaults = parse_annotation_defaults(constant_pool, class_file.methods())
+        .context("parse annotation defaults")?;
 
     Ok(ParsedClass {
         name: class_name,
@@ -879,6 +885,7 @@ fn parse_class_bytes(data: &[u8]) -> Result<ParsedClass> {
         referenced_classes: referenced.into_iter().collect(),
         fields,
         methods,
+        annotation_defaults,
         is_record,
     })
 }
@@ -967,6 +974,7 @@ fn parse_class_bytes_minimal(data: &[u8]) -> Result<ParsedClass> {
         referenced_classes: referenced.into_iter().collect(),
         fields: Vec::new(),
         methods: Vec::new(),
+        annotation_defaults: Vec::new(),
         is_record: false,
     })
 }
@@ -2462,6 +2470,58 @@ fn resolve_class_literal(constant_pool: &[ConstantPool], index: u16) -> Result<O
         ConstantPool::Class { name_index } => Ok(Some(resolve_utf8(constant_pool, *name_index)?)),
         _ => Ok(None),
     }
+}
+
+fn parse_annotation_defaults(
+    constant_pool: &[ConstantPool],
+    methods: &[jclassfile::methods::MethodInfo],
+) -> Result<Vec<AnnotationDefaultValue>> {
+    let mut defaults = Vec::new();
+    for method in methods {
+        let name =
+            resolve_utf8(constant_pool, method.name_index()).context("resolve method name")?;
+        let descriptor = resolve_utf8(constant_pool, method.descriptor_index())
+            .context("resolve method descriptor")?;
+        for attr in method.attributes() {
+            if let jclassfile::attributes::Attribute::AnnotationDefault { default_value, .. } = attr
+            {
+                if let jclassfile::attributes::ElementValue::ConstValueIndex {
+                    tag,
+                    const_value_index,
+                } = default_value
+                {
+                    if matches!(tag, b'B' | b'C' | b'D' | b'F' | b'I' | b'J' | b'S') {
+                        let entry = constant_pool
+                            .get(*const_value_index as usize)
+                            .context("missing annotation default constant pool entry")?;
+                        let numeric = match entry {
+                            ConstantPool::Integer { value } => {
+                                Some(AnnotationDefaultNumeric::Int(*value as i64))
+                            }
+                            ConstantPool::Long { value } => {
+                                Some(AnnotationDefaultNumeric::Int(*value))
+                            }
+                            ConstantPool::Float { value } => {
+                                Some(AnnotationDefaultNumeric::Float(*value as f64))
+                            }
+                            ConstantPool::Double { value } => {
+                                Some(AnnotationDefaultNumeric::Float(*value))
+                            }
+                            _ => None,
+                        };
+                        if let Some(value) = numeric {
+                            defaults.push(AnnotationDefaultValue {
+                                method_name: name.clone(),
+                                method_descriptor: descriptor.clone(),
+                                value,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(defaults)
 }
 
 fn resolve_numeric_literal(

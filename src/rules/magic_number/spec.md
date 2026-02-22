@@ -48,6 +48,8 @@ The rule applies to all non-synthetic, non-bridge methods, including `<clinit>` 
     - `tableswitch` / `lookupswitch` case values
     - Initial capacity arguments for collection-like types (`StringBuilder`,
       `StringBuffer`, `Collection`, `Map`)
+    - Enum constructor arguments in `<clinit>` (constants passed to `invokespecial <init>` on
+      enum subclasses of `java/lang/Enum`)
     - Values used in annotation contexts
     - Values used in the body of `hashCode()` methods
 - Synthetic or bridge methods.
@@ -185,8 +187,66 @@ class Dispatcher {
 }
 ```
 
-Not reported: `200` and `404` are case values within a `tableswitch` /
-`lookupswitch` instruction and are excluded.
+Not reported: `200` and `404` are case values within a `tableswitch` / `lookupswitch` instruction and are excluded.
+
+### True Negative — enum constructor arguments
+
+```java
+enum Duration {
+    ONE_HOUR(3600),
+    TWO_HOURS(7200);
+
+    private final int seconds;
+
+    Duration(int seconds) {
+        this.seconds = seconds;
+    }
+
+    int getSeconds() {
+        return seconds;
+    }
+}
+```
+
+Not reported: numeric literals passed to `invokespecial <init>` on the enum class in `<clinit>` are recognized as enum
+constructor arguments and excluded.
+
+### True Negative — Kotlin const val in companion object
+
+```kotlin
+class Config {
+    companion object {
+        const val TIMEOUT = 3600
+    }
+}
+```
+
+Not reported: `const val` values are compile-time constants. The Kotlin compiler inlines them at usage sites, so the
+literal does not appear in a method body that would be scanned.
+
+### True Positive — annotation default values
+
+```java
+@interface Retry {
+    int maxAttempts() default 3600;
+}
+```
+
+Reported: the annotation method `maxAttempts` has a numeric default value `3600` that is not in the allowlist.
+Annotation defaults are extracted from the `AnnotationDefault` attribute.
+
+### True Positive — Kotlin default argument values
+
+```kotlin
+class Service {
+    fun connect(timeout: Int = 3600): Boolean {
+        return true
+    }
+}
+```
+
+Reported: the Kotlin compiler emits a synthetic `connect$default` method containing the default value `3600`. The rule
+scans these synthetic `$default` methods and attributes findings to the enclosing real method.
 
 ## Output
 
