@@ -1394,6 +1394,7 @@ public @interface NullnessUnspecified {}
             access: MethodAccess {
                 is_public: true,
                 is_static: false,
+                is_synchronized: false,
                 is_abstract: false,
                 is_synthetic: false,
                 is_bridge: false,
@@ -1422,6 +1423,7 @@ public @interface NullnessUnspecified {}
             access: MethodAccess {
                 is_public: true,
                 is_static: false,
+                is_synchronized: false,
                 is_abstract: false,
                 is_synthetic: false,
                 is_bridge: false,
@@ -1467,6 +1469,7 @@ public @interface NullnessUnspecified {}
             access: MethodAccess {
                 is_public: true,
                 is_static: false,
+                is_synchronized: false,
                 is_abstract: false,
                 is_synthetic: false,
                 is_bridge: false,
@@ -1495,6 +1498,7 @@ public @interface NullnessUnspecified {}
             access: MethodAccess {
                 is_public: true,
                 is_static: false,
+                is_synchronized: false,
                 is_abstract: false,
                 is_synthetic: false,
                 is_bridge: false,
@@ -1539,6 +1543,7 @@ public @interface NullnessUnspecified {}
             MethodAccess {
                 is_public: true,
                 is_static: false,
+                is_synchronized: false,
                 is_abstract: false,
                 is_synthetic: false,
                 is_bridge: false,
@@ -1580,6 +1585,7 @@ public @interface NullnessUnspecified {}
             MethodAccess {
                 is_public: true,
                 is_static: true,
+                is_synchronized: false,
                 is_abstract: false,
                 is_synthetic: false,
                 is_bridge: false,
@@ -1638,6 +1644,7 @@ public @interface NullnessUnspecified {}
             MethodAccess {
                 is_public: true,
                 is_static: false,
+                is_synchronized: false,
                 is_abstract: false,
                 is_synthetic: false,
                 is_bridge: false,
@@ -1716,6 +1723,7 @@ public @interface NullnessUnspecified {}
             MethodAccess {
                 is_public: true,
                 is_static: false,
+                is_synchronized: false,
                 is_abstract: false,
                 is_synthetic: false,
                 is_bridge: false,

@@ -8,15 +8,12 @@ use crate::engine::AnalysisContext;
 use crate::ir::{Class, Method};
 use crate::rules::{Rule, RuleMetadata, class_location, method_location_with_line, result_message};
 
-const TARGET_COLLECTION_TYPES: [&str; 8] = [
+const TARGET_COLLECTION_TYPES: [&str; 5] = [
     "java/util/Set",
-    "java/util/List",
     "java/util/Collection",
     "java/util/HashSet",
     "java/util/LinkedHashSet",
     "java/util/TreeSet",
-    "java/util/ArrayList",
-    "java/util/LinkedList",
 ];
 
 /// Rule that flags enum collections that should use EnumSet instead.
@@ -571,14 +568,14 @@ public class ClassOne {
             path: "com/example/ClassTwo.java".to_string(),
             contents: r#"
 package com.example;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 enum EnumBeta { VALUE_ONE, VALUE_TWO, VALUE_THREE }
 
 public class ClassTwo {
     public void methodOne() {
-        List<EnumBeta> localOne = new ArrayList<>();
+        Set<EnumBeta> localOne = new HashSet<>();
         localOne.add(EnumBeta.VALUE_THREE);
     }
 }
@@ -665,6 +662,33 @@ public class ClassFour {
 
     public EnumSet<EnumGamma> methodOne() {
         return EnumSet.noneOf(EnumGamma.class);
+    }
+}
+"#
+            .to_string(),
+        }];
+        let messages = analyze_sources(sources);
+        assert!(messages.is_empty());
+    }
+
+    #[test]
+    fn prefer_enumset_ignores_list_enum_collections() {
+        let sources = vec![SourceFile {
+            path: "com/example/ClassSeven.java".to_string(),
+            contents: r#"
+package com.example;
+import java.util.ArrayList;
+import java.util.List;
+
+enum EnumZeta { VALUE_ONE, VALUE_TWO }
+
+public class ClassSeven {
+    private List<EnumZeta> fieldOne = new ArrayList<>();
+
+    public List<EnumZeta> methodOne(List<EnumZeta> inputOne) {
+        List<EnumZeta> localOne = new ArrayList<>();
+        localOne.addAll(inputOne);
+        return localOne;
     }
 }
 "#

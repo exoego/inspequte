@@ -1,7 +1,7 @@
 # Plan: Rule to Prefer EnumSet Over Other Collections
 
 ## Objective
-Create a static analysis rule that detects when developers use less efficient collection types (like `List<E>` or `Set<E>`) for enum values, and suggests using `EnumSet<E>` instead.
+Create a static analysis rule that detects when developers use less efficient set-like collection types (such as `Set<E>`/`Collection<E>` and concrete set implementations) for enum values, and suggests using `EnumSet<E>` instead.
 
 ## Background
 `EnumSet` is a specialized `Set` implementation for enum types that:
@@ -13,8 +13,8 @@ Create a static analysis rule that detects when developers use less efficient co
 Common inefficient patterns:
 ```java
 Set<MyEnum> states = new HashSet<>();           // Should use EnumSet
-List<MyEnum> flags = new ArrayList<>();         // Should use EnumSet if used as set
-Collection<MyEnum> values = new LinkedList<>(); // Should use EnumSet
+Collection<MyEnum> values = new HashSet<>();    // Should use EnumSet
+Set<MyEnum> flags = new TreeSet<>();            // Should use EnumSet
 ```
 
 Better approach:
@@ -32,7 +32,7 @@ Set<MyEnum> flags = EnumSet.of(MyEnum.VALUE1, MyEnum.VALUE2);
 "Prefer EnumSet for enum collections"
 
 ### Rule Description
-"Using EnumSet instead of general-purpose Set or List implementations for enum types provides better performance and memory efficiency."
+"Using EnumSet instead of general-purpose set-like implementations for enum types provides better performance and memory efficiency."
 
 ### Severity
 Warning (not error, as it's an optimization recommendation)
@@ -40,13 +40,13 @@ Warning (not error, as it's an optimization recommendation)
 ## Detection Strategy
 
 ### Pattern 1: Field Declarations
-Detect fields declared as `Set<E>`, `List<E>`, or `Collection<E>` where `E` is an enum type:
+Detect fields declared as `Set<E>` or `Collection<E>` where `E` is an enum type:
 
 ```java
 // Pattern to detect
 private Set<MyEnum> states = new HashSet<>();
-private List<MyEnum> flags = new ArrayList<>();
-private Collection<MyEnum> values = new LinkedList<>();
+private Collection<MyEnum> flags = new HashSet<>();
+private Set<MyEnum> values = new TreeSet<>();
 
 // Suggested fix
 private Set<MyEnum> states = EnumSet.noneOf(MyEnum.class);
@@ -63,7 +63,7 @@ void methodOne() {
 ```
 
 ### Pattern 3: Method Return Types
-Detect methods returning `Set<E>`, `List<E>`, or `Collection<E>` where `E` is an enum:
+Detect methods returning `Set<E>` or `Collection<E>` where `E` is an enum:
 
 ```java
 // Pattern to detect
@@ -78,12 +78,12 @@ public Set<MyEnum> getStates() {
 ```
 
 ### Pattern 4: Constructor Calls
-Detect instantiation of `HashSet`, `TreeSet`, `LinkedHashSet`, `ArrayList`, etc. with enum type parameters:
+Detect instantiation of set-like types such as `HashSet`, `TreeSet`, and `LinkedHashSet` with enum type parameters:
 
 ```java
 new HashSet<MyEnum>()
-new ArrayList<MyEnum>()
 new TreeSet<MyEnum>()
+new LinkedHashSet<MyEnum>()
 ```
 
 ## Implementation Approach
@@ -98,10 +98,10 @@ new TreeSet<MyEnum>()
 ### Type Information Required
 - Map of class names to their superclass (to identify enums)
 - Generic signature parsing for parameterized types
-- Collection type recognition (`java.util.Set`, `java.util.List`, `java.util.Collection`)
+- Collection type recognition (`java.util.Set`, `java.util.Collection`)
 
 ### Bytecode Instructions to Monitor
-- `NEW` + `INVOKESPECIAL` for `java/util/HashSet`, `ArrayList`, etc.
+- `NEW` + `INVOKESPECIAL` for `java/util/HashSet`, `java/util/LinkedHashSet`, `java/util/TreeSet`, etc.
 - Field signatures in `FieldInfo` structures
 - Method signatures in `MethodInfo` structures
 - Local variable type annotations
@@ -118,7 +118,7 @@ impl Rule for PreferEnumSetRule {
         RuleMetadata {
             id: "PREFER_ENUMSET",
             name: "Prefer EnumSet for enum collections",
-            description: "Using EnumSet for enum types provides better performance than HashSet or ArrayList",
+            description: "Using EnumSet for enum types provides better performance than general collections",
         }
     }
     
@@ -162,7 +162,7 @@ fn check_method_signatures(method: &Method, enums: &BTreeSet<String>) -> Vec<Sar
 Detect `new HashSet<EnumType>()` patterns:
 ```rust
 fn check_instantiation(method: &Method, enums: &BTreeSet<String>) -> Vec<SarifResult> {
-    // Look for NEW opcode for HashSet, ArrayList, etc.
+    // Look for NEW opcode for HashSet/LinkedHashSet/TreeSet, etc.
     // Check if type parameter is an enum
 }
 ```
@@ -214,7 +214,7 @@ enum Priority { LOW, MEDIUM, HIGH }
 
 public class ClassC {
     void methodOne() {
-        List<Priority> priorities = new ArrayList<>();  // Should report
+        Set<Priority> priorities = new HashSet<>();  // Should report
         priorities.add(Priority.HIGH);
     }
 }
@@ -224,7 +224,7 @@ public class ClassC {
 ```java
 public class ClassD {
     private Set<String> strings = new HashSet<>();  // Should NOT report (not enum)
-    private List<Integer> numbers = new ArrayList<>();  // Should NOT report (not enum)
+    private Collection<Integer> numbers = new HashSet<>();  // Should NOT report (not enum)
 }
 ```
 
@@ -272,9 +272,10 @@ public class ClassE {
 - Performance impact metrics in the report
 
 ## Success Criteria
-- Correctly identifies `Set<E>`, `List<E>`, `Collection<E>` where E is enum
+- Correctly identifies set-like enum collections such as `Set<E>` and `Collection<E>`
 - Does NOT report for non-enum types
 - Does NOT report when `EnumSet` is already used
+- Does NOT report `List<E>` because list ordering semantics are not equivalent to `EnumSet`
 - Provides clear, actionable message
 - Includes proper location information (class, method, line)
 - Test coverage for all patterns
