@@ -464,6 +464,7 @@ mod tests {
             access: MethodAccess {
                 is_public: false,
                 is_static: true,
+                is_synchronized: false,
                 is_abstract: false,
                 is_synthetic: false,
                 is_bridge: false,

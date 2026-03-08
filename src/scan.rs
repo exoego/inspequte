@@ -1188,6 +1188,7 @@ fn parse_methods(
         let access = MethodAccess {
             is_public: access_flags.contains(MethodFlags::ACC_PUBLIC),
             is_static: access_flags.contains(MethodFlags::ACC_STATIC),
+            is_synchronized: access_flags.contains(MethodFlags::ACC_SYNCHRONIZED),
             is_abstract: access_flags.contains(MethodFlags::ACC_ABSTRACT),
             is_synthetic: access_flags.contains(MethodFlags::ACC_SYNTHETIC),
             is_bridge: access_flags.contains(MethodFlags::ACC_BRIDGE),
