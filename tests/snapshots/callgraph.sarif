@@ -133,6 +133,13 @@
               }
             },
             {
+              "id": "FUTURE_WAIT_WHILE_HOLDING_LOCK",
+              "name": "Future wait while holding lock",
+              "shortDescription": {
+                "text": "Blocking Future waits should not happen while a lock is still held"
+              }
+            },
+            {
               "id": "INEFFECTIVE_EQUALS_HASHCODE",
               "name": "Ineffective equals/hashCode",
               "shortDescription": {

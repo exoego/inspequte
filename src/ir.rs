@@ -95,6 +95,7 @@ pub(crate) struct LocalVariableType {
 pub(crate) struct MethodAccess {
     pub(crate) is_public: bool,
     pub(crate) is_static: bool,
+    pub(crate) is_synchronized: bool,
     pub(crate) is_abstract: bool,
     pub(crate) is_synthetic: bool,
     pub(crate) is_bridge: bool,
