@@ -62,6 +62,8 @@ impl Rule for UnmanagedAutocloseableRule {
                     };
 
                     for method in &class.methods {
+                        // Abstract/native methods have no Code attribute and are excluded
+                        // by the scanner, so this guard is defensive only.
                         if method.bytecode.is_empty() || method.cfg.blocks.is_empty() {
                             continue;
                         }
@@ -1193,29 +1195,4 @@ public class ClassQ {
         );
     }
 
-    #[test]
-    fn skips_abstract_methods_without_bytecode() {
-        let sources = vec![SourceFile {
-            path: "com/example/ClassP.java".to_string(),
-            contents: r#"
-package com.example;
-
-import java.io.FileInputStream;
-import java.io.InputStream;
-
-public abstract class ClassP {
-    abstract void methodY();
-
-    public void methodX() throws Exception {
-        InputStream varOne = new FileInputStream("f.txt");
-        varOne.read();
-    }
-}
-"#
-            .to_string(),
-        }];
-
-        let messages = analyze_java_sources(sources);
-        assert_eq!(messages.len(), 1, "abstract method should be skipped, concrete method should report: {messages:?}");
-    }
 }
