@@ -1,8 +1,8 @@
-# UNMANAGED_AUTOCLOSEABLE
+# AUTOCLOSEABLE_NOT_CLOSED
 
 ## Summary
 
-- Rule ID: `UNMANAGED_AUTOCLOSEABLE`
+- Rule ID: `AUTOCLOSEABLE_NOT_CLOSED`
 - Name: AutoCloseable not closed
 - Description: Detects locally created `AutoCloseable` instances that can reach a method exit without `close()` being
   called on every reachable path in the same method.

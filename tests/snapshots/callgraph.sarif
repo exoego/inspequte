@@ -42,6 +42,13 @@
               }
             },
             {
+              "id": "AUTOCLOSEABLE_NOT_CLOSED",
+              "name": "AutoCloseable not closed",
+              "shortDescription": {
+                "text": "Locally created AutoCloseable instances should be closed on every exit path"
+              }
+            },
+            {
               "id": "BIGDECIMAL_DIVIDE_WITHOUT_ROUNDING",
               "name": "BigDecimal divide without rounding",
               "shortDescription": {
@@ -417,13 +424,6 @@
               "name": "Thread.sleep call",
               "shortDescription": {
                 "text": "Thread.sleep introduces timing-coupled blocking"
-              }
-            },
-            {
-              "id": "UNMANAGED_AUTOCLOSEABLE",
-              "name": "AutoCloseable not closed",
-              "shortDescription": {
-                "text": "Locally created AutoCloseable instances should be closed on every exit path"
               }
             },
             {

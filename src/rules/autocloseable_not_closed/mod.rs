@@ -29,7 +29,7 @@ crate::register_rule!(UnmanagedAutocloseableRule);
 impl Rule for UnmanagedAutocloseableRule {
     fn metadata(&self) -> RuleMetadata {
         RuleMetadata {
-            id: "UNMANAGED_AUTOCLOSEABLE",
+            id: "AUTOCLOSEABLE_NOT_CLOSED",
             name: "AutoCloseable not closed",
             description: "Locally created AutoCloseable instances should be closed on every exit path",
         }
@@ -716,7 +716,7 @@ mod tests {
         output
             .results
             .iter()
-            .filter(|result| result.rule_id.as_deref() == Some("UNMANAGED_AUTOCLOSEABLE"))
+            .filter(|result| result.rule_id.as_deref() == Some("AUTOCLOSEABLE_NOT_CLOSED"))
             .filter_map(|result| result.message.text.clone())
             .collect()
     }
@@ -772,7 +772,7 @@ class ClassA {
         let messages: Vec<String> = output
             .results
             .iter()
-            .filter(|result| result.rule_id.as_deref() == Some("UNMANAGED_AUTOCLOSEABLE"))
+            .filter(|result| result.rule_id.as_deref() == Some("AUTOCLOSEABLE_NOT_CLOSED"))
             .filter_map(|result| result.message.text.clone())
             .collect();
         assert_eq!(messages.len(), 1);
