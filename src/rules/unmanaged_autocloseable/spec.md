@@ -54,8 +54,10 @@ The following types are excluded from detection because their `close()` is a no-
     - returning the resource
     - passing the resource as an argument to another method
 - Wrapper delegation: when a locally created AutoCloseable is passed as a constructor argument to another
-  AutoCloseable (e.g., `new BufferedReader(new FileReader(...))`), the inner resource is considered delegated to the
-  outer and is not reported.
+  non-excluded AutoCloseable (e.g., `new BufferedReader(new FileReader(...))`), the inner resource is considered
+  delegated to the outer and is not reported. However, if the outer type is an excluded no-op type (e.g.,
+  `MemoryCacheImageInputStream`), the inner resource is NOT considered delegated because the outer's `close()` will
+  not close the inner resource.
 - Proof that `close()` happens in a different helper method after ownership transfer.
 - Custom close methods (`release()`, `dispose()`, etc.) that are not `close()`.
 - Suppression behavior via `@Suppress` or `@SuppressWarnings`.
@@ -252,12 +254,30 @@ class ClassA {
 }
 ```
 
+### Edge — wrapped by excluded no-op type (reported for varOne)
+
+```java
+import java.io.FileInputStream;
+import java.io.InputStream;
+import javax.imageio.stream.MemoryCacheImageInputStream;
+
+class ClassA {
+    void methodX() throws Exception {
+        InputStream varOne = new FileInputStream("f.txt");
+        MemoryCacheImageInputStream varTwo = new MemoryCacheImageInputStream(varOne);
+        varTwo.readByte();
+        varTwo.close();
+    }
+}
+```
+
 ## Output
 
 - Report one finding per locally created AutoCloseable whose `close()` is not guaranteed on all reachable exits.
-- Message must be actionable and include the method context, for example:
-  `AutoCloseable created in <class>.<method><descriptor> may not be closed on all paths; use try-with-resources or call close() in a finally block.`
-- Primary fix guidance: wrap the resource in a try-with-resources statement, or call `close()` in a `finally` block.
+- Message must be actionable and include the method context. Fix guidance is language-aware:
+  - Java: `AutoCloseable created in <class>.<method><descriptor> may not be closed on all paths; use try-with-resources or call close() in a finally block.`
+  - Kotlin: `AutoCloseable created in <class>.<method><descriptor> may not be closed on all paths; use .use {} or call close() in a finally block.`
+- Language is determined from the class `SourceFile` attribute (`.kt` suffix indicates Kotlin).
 
 ## Performance considerations
 

@@ -420,6 +420,13 @@
               }
             },
             {
+              "id": "UNMANAGED_AUTOCLOSEABLE",
+              "name": "AutoCloseable not closed",
+              "shortDescription": {
+                "text": "Locally created AutoCloseable instances should be closed on every exit path"
+              }
+            },
+            {
               "id": "UNUSED_LAMBDA_PARAMETERS",
               "name": "Unused lambda parameter",
               "shortDescription": {
